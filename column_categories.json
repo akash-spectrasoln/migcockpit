@@ -1,0 +1,15 @@
+{
+    "date": ["date", "order_date", "dt", "datetime", "timestamp"],
+    "country_name": ["country", "country_name", "nation"],
+    "country_code": ["country_code", "cc", "country_cd"],
+    "region_category": ["region", "region_category", "state", "province", "subdivision"],
+    "zip_code": ["zip", "zip_code", "zipcode"],
+    "postal_code": ["postal", "postal_code", "postcode"],
+    "currency_code": ["currency", "currency_code", "curr"],
+    "numerical": ["amount", "price", "value", "cost", "number", "qty", "quantity","salary"],
+    "string":["email", "name", "first_name", "last_name", "description", "title", "status", "type", "category", "address", "city", "state", "country", "company", "department", "role", "position", "comment", "note", "text", "message", "content"]
+}
+
+
+
+
