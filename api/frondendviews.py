@@ -25,8 +25,8 @@ def comapany_admin_auth_required(view_func):
             
             user, token = auth_result
             
-            # Check if user is authenticated and is superuser (admin)
-            if not user.is_authenticated or not user.is_staff:
+            # Check if user is authenticated and is not superuser (admin)
+            if not user.is_authenticated or user.is_superuser:
                 return redirect('login_page')
             
             # User is authenticated, add user to request and proceed
@@ -127,5 +127,10 @@ def password_reset_confirm(request, uidb64, token):
 		'uidb64': uidb64,
 		'token': token
 	})
+
+@comapany_admin_auth_required
+def validation_rules_page(request):
+	"""Frontend view for validation rules generator page"""
+	return render(request, 'validation_rules.html')
 
 

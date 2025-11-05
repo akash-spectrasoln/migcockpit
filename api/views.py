@@ -8,11 +8,14 @@ from django.db import connection, transaction
 from django.http import HttpResponse
 from .models import SourceDB, SourceForm, Customer, Country, User   
 from .serializers import SqlConnectionSerializer, SourceDbSerializer, SourceFormSerializer, CountrySerializer, SourceConnectionSerializer, DestinationConnectionSerializer, FileUploadSerializer, CustomerSerializer, UserSerializer
+from .models import ValidationRules
+from .serializers import ValidationRulesSerializer
 from fetch_sqlserver.fetch_sqldata import extract_data
 from encryption.encryption import encrypt_field, decrypt_field
 from django.utils import timezone
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 import hashlib
 import json
 import psycopg2
@@ -21,6 +24,10 @@ from django.conf import settings
 import pandas as pd
 import io
 import pycountry
+import pgeocode
+import zipcodes
+import country_converter as cc
+import pint
 from api.authentications import JWTCookieAuthentication
 
 
@@ -177,6 +184,114 @@ def test_postgresql_connection(hostname, port, user, password, schema=None):
     except Exception as e:
         return False, f"PostgreSQL unexpected error: {str(e)}"
 
+
+def convert_user_date_format_to_strftime(user_date_format):
+    """
+    Convert user-friendly date format (e.g., 'MM-DD-YYYY') to Python strftime format (e.g., '%m-%d-%Y').
+    
+    Args:
+        user_date_format: String format like 'MM-DD-YYYY', 'DD-MM-YYYY', etc.
+    
+    Returns:
+        Python strftime format string
+    """
+    # Mapping of user-friendly format to strftime format
+    format_mapping = {
+        'YYYY': '%Y',
+        'YY': '%y',
+        'MM': '%m',
+        'DD': '%d',
+        'HH': '%H',
+        'mm': '%M',
+        'SS': '%S'
+    }
+    
+    strftime_format = user_date_format
+    for user_fmt, strftime_fmt in format_mapping.items():
+        strftime_format = strftime_format.replace(user_fmt, strftime_fmt)
+    
+    return strftime_format
+
+
+def format_date_columns(data, columns, date_format):
+    """
+    Format date and timestamp columns in the data based on column datatypes.
+    
+    Args:
+        data: List of dictionaries containing row data
+        columns: List of tuples containing (column_name, data_type, is_nullable)
+        date_format: String format for output dates in strftime format
+    
+    Returns:
+        Formatted data with dates properly formatted
+    """
+    if not data:
+        return data
+    
+    # Identify date/timestamp columns based on datatype
+    date_columns = []
+    time_columns = []  # Track columns that should include time
+    
+    for col in columns:
+        col_name, col_type = col[0], col[1].lower()
+        # Check for date, timestamp, or datetime datatypes (including PostgreSQL variations)
+        if any(dtype in col_type for dtype in ['timestamp', 'datetime']):
+            # Timestamp columns may include time information
+            date_columns.append(col_name)
+            time_columns.append(col_name)
+        elif 'date' in col_type and 'time' not in col_type:
+            # Pure date columns (not timestamp)
+            date_columns.append(col_name)
+    
+    # If no date columns found, return data as is
+    if not date_columns:
+        return data
+    
+    # Format date columns in each row
+    for row in data:
+        for col_name in date_columns:
+            if col_name in row and row[col_name] is not None:
+                value = row[col_name]
+                try:
+                    # Determine format to use based on whether this column should include time
+                    format_to_use = date_format
+                    
+                    # If value is a string (ISO format from database), parse it first
+                    if isinstance(value, str):
+                        # Try parsing ISO format or other common formats
+                        import dateutil.parser
+                        parsed_date = dateutil.parser.parse(value)
+                        
+                        # For timestamp columns, check if time component exists and is not midnight
+                        if col_name in time_columns:
+                            # Check if the time component is not 00:00:00
+                            if parsed_date.hour != 0 or parsed_date.minute != 0 or parsed_date.second != 0:
+                                # Append time format to date format
+                                format_to_use = f"{date_format} %H:%M:%S"
+                        
+                        row[col_name] = parsed_date.strftime(format_to_use)
+                    # If value has strftime method (datetime object), format directly
+                    elif hasattr(value, 'strftime'):
+                        # For timestamp columns, check if time component exists and is not midnight
+                        if col_name in time_columns:
+                            # Check if the time component is not 00:00:00
+                            if value.hour != 0 or value.minute != 0 or value.second != 0:
+                                # Append time format to date format
+                                format_to_use = f"{date_format} %H:%M:%S"
+                        
+                        row[col_name] = value.strftime(format_to_use)
+                except Exception:
+                    # If formatting fails, convert to ISO format string for JSON serialization
+                    try:
+                        if hasattr(value, 'isoformat'):
+                            row[col_name] = value.isoformat()
+                    except:
+                        # Last resort: keep original value
+                        continue
+    
+    return data
+
+
 def decrypt_source_data(encrypted_data, cust_id, created_on):
     """
     Decrypt source data using the same key generation logic.
@@ -215,7 +330,7 @@ class SqlConnectionView(APIView):
                 data['sql_database'],
                 data['sql_username'],
                 data['sql_password'],
-                data['sql_port'],
+                1433
             )
             if success:
                 return Response({"message": "success"}, status=status.HTTP_201_CREATED)
@@ -1268,6 +1383,126 @@ class FileUploadPreviewView(APIView):
         df_cleaned = df_cleaned.reset_index(drop=True)
         
         return df_cleaned
+    
+    def _detect_date_format(self, series):
+        """
+        Detect the consistent date format for a column by analyzing unambiguous dates.
+        Returns the format string that should be used, or None if no format detected.
+        """
+        non_null_values = series.dropna()
+        if len(non_null_values) == 0:
+            return None
+        
+        # Sample for performance
+        sample = non_null_values.head(100) if len(non_null_values) > 100 else non_null_values
+        
+        # Try each format and score based on successful conversions
+        formats_to_try = [
+            '%Y-%m-%d',                  # 2024-01-15
+            '%m/%d/%Y',                  # 01/15/2024 (US format - month first)
+            '%d/%m/%Y',                  # 15/01/2024 (European format - day first)
+            '%m-%d-%Y',                  # 01-15-2024 (US format - month first)
+            '%d-%m-%Y',                  # 15-01-2024 (European format - day first)
+            '%Y/%m/%d',                  # 2024/01/15
+            '%Y%m%d',                    # 20240115
+            '%d.%m.%Y',                  # 15.01.2024
+            '%Y-%m-%d %H:%M:%S',         # 2024-01-15 14:30:00
+            '%m/%d/%Y %H:%M:%S',         # 01/15/2024 14:30:00
+            '%d/%m/%Y %H:%M:%S',         # 15/01/2024 14:30:00
+            '%m-%d-%Y %H:%M:%S',         # 01-15-2024 14:30:00
+            '%d-%m-%Y %H:%M:%S',         # 15-01-2024 14:30:00
+            '%Y-%m-%d %H:%M:%S.%f',      # 2024-01-15 14:30:00.123456
+            '%m-%d-%Y %H:%M:%S.%f',      # 01-15-2024 14:30:00.123456
+            '%d-%m-%Y %H:%M:%S.%f',      # 15-01-2024 14:30:00.123456
+            '%m/%d/%Y %H:%M:%S.%f',      # 01/15/2024 14:30:00.123456
+            '%d/%m/%Y %H:%M:%S.%f',      # 15/01/2024 14:30:00.123456
+        ]
+        
+        best_format = None
+        best_score = 0
+        
+        for fmt in formats_to_try:
+            try:
+                converted = pd.to_datetime(sample, format=fmt, errors='coerce')
+                success_count = converted.notna().sum()
+                
+                # Calculate success rate
+                if success_count > best_score:
+                    best_score = success_count
+                    best_format = fmt
+            except (ValueError, TypeError):
+                continue
+        
+        # Return format if at least 60% success rate
+        if best_score / len(sample) > 0.6:
+            return best_format
+        
+        return None
+    
+    def _is_datetime_column(self, series):
+        """
+        Efficiently detect if a pandas Series contains datetime values.
+        Uses format detection to ensure consistent parsing.
+        """
+        # Skip empty or all-null columns
+        non_null_values = series.dropna()
+        if len(non_null_values) == 0:
+            return False
+        
+        # If already datetime type, return True
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return True
+        
+        # Try to detect the format
+        detected_format = self._detect_date_format(series)
+        if detected_format:
+            return True
+        
+        # Fallback: Try with infer_datetime_format
+        try:
+            sample = non_null_values.head(100) if len(non_null_values) > 100 else non_null_values
+            converted = pd.to_datetime(sample, errors='coerce', infer_datetime_format=True)
+            success_rate = converted.notna().sum() / len(sample)
+            return success_rate > 0.6
+        except (ValueError, TypeError):
+            return False
+    
+    def _detect_datetime_type(self, series):
+        """
+        Determine if datetime column should be DATE or TIMESTAMP.
+        Returns 'DATE' if all times are midnight (00:00:00), otherwise 'TIMESTAMP'.
+        Uses consistent format detection.
+        """
+        try:
+            # First, try to detect the consistent format
+            detected_format = self._detect_date_format(series)
+            
+            if detected_format:
+                # Use the detected format for consistent parsing
+                datetime_series = pd.to_datetime(series, format=detected_format, errors='coerce')
+            else:
+                # Fallback to infer_datetime_format
+                datetime_series = pd.to_datetime(series, errors='coerce', infer_datetime_format=True)
+            
+            non_null_datetimes = datetime_series.dropna()
+            
+            if len(non_null_datetimes) == 0:
+                return 'TIMESTAMP'  # Default to TIMESTAMP if no valid dates
+            
+            # Sample for performance (check first 100 rows)
+            sample = non_null_datetimes.head(100) if len(non_null_datetimes) > 100 else non_null_datetimes
+            
+            # Check if all times are at midnight (00:00:00)
+            # This indicates date-only data
+            has_time_component = any(
+                dt.hour != 0 or dt.minute != 0 or dt.second != 0 or dt.microsecond != 0
+                for dt in sample
+            )
+            
+            # Return DATE if no time component, TIMESTAMP if has time
+            return 'TIMESTAMP' if has_time_component else 'DATE'
+        except Exception:
+            return 'TIMESTAMP'  # Default to TIMESTAMP on error
 
     def post(self, request):
         serializer = FileUploadSerializer(data=request.data)
@@ -1291,10 +1526,11 @@ class FileUploadPreviewView(APIView):
                 uploaded_file.seek(0)
 
                 # Read file into pandas DataFrame
+                # Don't use dtype=str to allow pandas to infer types (especially dates)
                 if file_extension == 'csv':
-                    df = pd.read_csv(uploaded_file, encoding='utf-8', dtype=str, keep_default_na=False)
+                    df = pd.read_csv(uploaded_file, encoding='utf-8', keep_default_na=True)
                 elif file_extension in ['xls', 'xlsx']:
-                    df = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str, keep_default_na=False)
+                    df = pd.read_excel(uploaded_file, engine='openpyxl', keep_default_na=True)
                 else:
                     return Response(
                         {"error": "Unsupported file format. Please upload .csv or .xls/.xlsx file."},
@@ -1304,7 +1540,7 @@ class FileUploadPreviewView(APIView):
                 # Remove empty rows from DataFrame
                 df = self._remove_empty_rows(df)
 
-                # Clean DataFrame and fix phone number scientific notation
+                # Clean DataFrame
                 df_clean = df.where(pd.notnull(df), None)
                 
                 # Check for reserved field names
@@ -1340,6 +1576,8 @@ class FileUploadPreviewView(APIView):
 
                 # Detect column types by checking all data in each column
                 column_info = []
+                datetime_columns = {}  # Store columns that are datetime and their detected format
+                
                 for col in df_clean.columns:
                     col_name = col.strip().replace(" ", "_").replace("-", "_").lower()
                     col_lower = col.lower()
@@ -1352,11 +1590,22 @@ class FileUploadPreviewView(APIView):
                     # First, calculate max length for VARCHAR sizing
                     max_length = df_clean[col].astype(str).str.len().max()
                     varchar_length = max_length + 50  # Add exactly 50 to the biggest data length
-
-                    if any(keyword in col_lower for keyword in ['phone', 'mobile', 'tel', 'contact']):
+                    
+                    col_type = None  # Initialize as None to track if type was detected
+                    
+                    # Priority 1: Check for date/timestamp columns using pandas
+                    if self._is_datetime_column(df_clean[col]):
+                        col_type = self._detect_datetime_type(df_clean[col])
+                        # Store the detected format for this column
+                        detected_format = self._detect_date_format(df_clean[col])
+                        datetime_columns[col] = detected_format
+                    # Priority 2: Check for phone numbers
+                    elif any(keyword in col_lower for keyword in ['phone', 'mobile', 'tel', 'contact']):
                         col_type = 'VARCHAR(20)'
+                    # Priority 3: Check for values with + sign (likely phone numbers with country code)
                     elif any('+' in str(val) for val in all_values if pd.notna(val)):
                         col_type = f'VARCHAR({varchar_length})'
+                    # Priority 4: Check for integers
                     elif all(str(val).isdigit() for val in all_values if pd.notna(val) and str(val) != ''):
                         # Check if numbers are within INTEGER range (-2,147,483,648 to 2,147,483,647)
                         max_int = 2147483647
@@ -1369,8 +1618,8 @@ class FileUploadPreviewView(APIView):
                                 col_type = 'BIGINT'  # Use BIGINT for large integers
                         except (ValueError, OverflowError):
                             col_type = 'BIGINT'  # Use BIGINT if conversion fails
+                    # Priority 5: Check for decimal numbers
                     elif all(str(val).replace('.', '').isdigit() and str(val).count('.') <= 1 for val in all_values if pd.notna(val) and str(val) != ''):
-                        # Check if it's a decimal number
                         try:
                             decimal_values = [float(val) for val in all_values if pd.notna(val) and str(val) != '']
                             # Check if all values are whole numbers (no decimal part)
@@ -1385,8 +1634,8 @@ class FileUploadPreviewView(APIView):
                                 col_type = 'REAL'
                         except (ValueError, OverflowError):
                             col_type = 'REAL'
+                    # Default: VARCHAR with proper sizing
                     else:
-                        # Default to VARCHAR with proper sizing
                         col_type = f'VARCHAR({varchar_length})'
 
                     column_info.append({
@@ -1395,6 +1644,15 @@ class FileUploadPreviewView(APIView):
                         'postgresql_type': col_type,
                         'sample_values': [str(val) for val in sample_values.head(3).tolist()]
                     })
+                
+                # Convert datetime columns using the detected format for consistency
+                for col, fmt in datetime_columns.items():
+                    if fmt:
+                        # Use the detected format to parse ALL values consistently
+                        df_clean[col] = pd.to_datetime(df_clean[col], format=fmt, errors='coerce')
+                    else:
+                        # Fallback if format detection failed
+                        df_clean[col] = pd.to_datetime(df_clean[col], errors='coerce', infer_datetime_format=True)
 
                 # Get sample data for preview (first 10 rows)
                 sample_data = df_clean.head(10).to_dict('records')
@@ -1485,6 +1743,85 @@ class WriteTableToDatabaseView(APIView):
         
         return df_cleaned
     
+    def _detect_date_format(self, series):
+        """
+        Detect the consistent date format for a column by analyzing unambiguous dates.
+        Returns the format string that should be used, or None if no format detected.
+        """
+        non_null_values = series.dropna()
+        if len(non_null_values) == 0:
+            return None
+        
+        # Sample for performance
+        sample = non_null_values.head(100) if len(non_null_values) > 100 else non_null_values
+        
+        # Try each format and score based on successful conversions
+        formats_to_try = [
+            '%Y-%m-%d',                  # 2024-01-15
+            '%m/%d/%Y',                  # 01/15/2024 (US format - month first)
+            '%d/%m/%Y',                  # 15/01/2024 (European format - day first)
+            '%m-%d-%Y',                  # 01-15-2024 (US format - month first)
+            '%d-%m-%Y',                  # 15-01-2024 (European format - day first)
+            '%Y/%m/%d',                  # 2024/01/15
+            '%Y%m%d',                    # 20240115
+            '%d.%m.%Y',                  # 15.01.2024
+            '%Y-%m-%d %H:%M:%S',         # 2024-01-15 14:30:00
+            '%m/%d/%Y %H:%M:%S',         # 01/15/2024 14:30:00
+            '%d/%m/%Y %H:%M:%S',         # 15/01/2024 14:30:00
+            '%m-%d-%Y %H:%M:%S',         # 01-15-2024 14:30:00
+            '%d-%m-%Y %H:%M:%S',         # 15-01-2024 14:30:00
+            '%Y-%m-%d %H:%M:%S.%f',      # 2024-01-15 14:30:00.123456
+            '%m-%d-%Y %H:%M:%S.%f',      # 01-15-2024 14:30:00.123456
+            '%d-%m-%Y %H:%M:%S.%f',      # 15-01-2024 14:30:00.123456
+            '%m/%d/%Y %H:%M:%S.%f',      # 01/15/2024 14:30:00.123456
+            '%d/%m/%Y %H:%M:%S.%f',      # 15/01/2024 14:30:00.123456
+        ]
+        
+        best_format = None
+        best_score = 0
+        
+        for fmt in formats_to_try:
+            try:
+                converted = pd.to_datetime(sample, format=fmt, errors='coerce')
+                success_count = converted.notna().sum()
+                
+                # Calculate success rate
+                if success_count > best_score:
+                    best_score = success_count
+                    best_format = fmt
+            except (ValueError, TypeError):
+                continue
+        
+        # Return format if at least 60% success rate
+        if best_score / len(sample) > 0.6:
+            return best_format
+        
+        return None
+    
+    def _convert_datetime_value(self, value, column_type):
+        """
+        Convert datetime value to appropriate format for database insertion.
+        Handles both DATE and TIMESTAMP types.
+        """
+        if pd.isna(value) or value == '' or value is None:
+            return None
+        
+        try:
+            # Convert to datetime using pandas
+            dt = pd.to_datetime(value, errors='coerce', infer_datetime_format=True)
+            
+            if pd.isna(dt):
+                return None
+            
+            # Convert pandas Timestamp to Python datetime
+            if isinstance(dt, pd.Timestamp):
+                dt = dt.to_pydatetime()
+            
+            # Return the datetime object (PostgreSQL will handle the conversion)
+            return dt
+        except Exception:
+            return None
+    
     def post(self, request):
         try:
             # Get the uploaded file
@@ -1500,7 +1837,7 @@ class WriteTableToDatabaseView(APIView):
             scope = request.data.get('scope')
             schema = request.data.get('schema')
 
-            print(f"Debug - scope: {scope}, schema: {schema},[[[[[[[[[[[[[[]]]]]]]]]]]]]]") 
+      
             
             # Parse columns if it's a JSON string
             if isinstance(columns_data, str):
@@ -1550,11 +1887,12 @@ class WriteTableToDatabaseView(APIView):
             file_extension = uploaded_file.name.lower().split('.')[-1]
             
             # Read file into pandas DataFrame
+            # Don't use dtype=str to preserve datetime types
             uploaded_file.seek(0)
             if file_extension == 'csv':
-                df = pd.read_csv(uploaded_file, encoding='utf-8', dtype=str)
+                df = pd.read_csv(uploaded_file, encoding='utf-8', keep_default_na=True)
             elif file_extension in ['xls', 'xlsx']:
-                df = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str)
+                df = pd.read_excel(uploaded_file, engine='openpyxl', keep_default_na=True)
             else:
                 return Response(
                     {"error": "Unsupported file format. Please upload .csv or .xls/.xlsx file."},
@@ -1566,6 +1904,22 @@ class WriteTableToDatabaseView(APIView):
             
             # Clean DataFrame
             df_clean = df.where(pd.notnull(df), None)
+            
+            # Convert datetime columns using detected format for consistency
+            # Check each column to see if it's a date/timestamp type
+            for col in columns:
+                original_name = col.get('original_name')
+                col_type = col.get('postgresql_type', '').upper()
+                
+                # If this column is DATE or TIMESTAMP type, convert it consistently
+                if col_type in ['DATE', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE']:
+                    if original_name in df_clean.columns:
+                        # Detect format and convert
+                        detected_format = self._detect_date_format(df_clean[original_name])
+                        if detected_format:
+                            df_clean[original_name] = pd.to_datetime(df_clean[original_name], format=detected_format, errors='coerce')
+                        else:
+                            df_clean[original_name] = pd.to_datetime(df_clean[original_name], errors='coerce', infer_datetime_format=True)
             
             # Build SQL for creating table
             column_definitions = []
@@ -1606,6 +1960,7 @@ class WriteTableToDatabaseView(APIView):
                 row_data = []
                 for i, col_name in enumerate(column_names):
                     original_col_name = original_column_names[i]
+                    col_type = insert_columns[i].get('postgresql_type', '') if i < len(insert_columns) else None
                     
                     # Handle is_active field specially
                     if col_name == 'is_active':
@@ -1620,13 +1975,15 @@ class WriteTableToDatabaseView(APIView):
                         
                         if pd.isna(val):
                             row_data.append(None)
+                        # Handle date/timestamp columns
+                        elif col_type and col_type.upper() in ['DATE', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE', 'TIMESTAMP WITH TIME ZONE']:
+                            row_data.append(self._convert_datetime_value(val, col_type))
                         elif isinstance(val, pd.Timestamp):
                             row_data.append(val.to_pydatetime())
                         else:
                             # Apply scientific notation fix for phone numbers and numeric columns before storing
                             if (original_col_name and any(keyword in original_col_name.lower() for keyword in ['phone', 'mobile', 'tel', 'contact'])) or \
-                               (i < len(insert_columns) and insert_columns[i].get('postgresql_type', '').upper() in ['BIGINT', 'INTEGER', 'SMALLINT', 'NUMERIC', 'DECIMAL']):
-                                col_type = insert_columns[i].get('postgresql_type', '') if i < len(insert_columns) else None
+                               (col_type and col_type.upper() in ['BIGINT', 'INTEGER', 'SMALLINT', 'NUMERIC', 'DECIMAL']):
                                 val = self._fix_scientific_notation(val, col_type)
                             row_data.append(val)
                 data_tuples.append(tuple(row_data))
@@ -1906,6 +2263,35 @@ class GetTableDataView(APIView):
                 where_conditions.append(f'"{column}" IS NULL')
             elif operator == 'IS NOT NULL':
                 where_conditions.append(f'"{column}" IS NOT NULL')
+            elif operator == 'MISMATCH':
+                # Handle MISMATCH operator - value contains JSON string with mismatch pairs
+                try:
+                    import json
+                    mismatch_data = json.loads(value) if isinstance(value, str) else value
+                    if isinstance(mismatch_data, list) and len(mismatch_data) > 0:
+                        # Get the first item to determine related column name
+                        first_item = mismatch_data[0]
+                        related_column = None
+                        for key in first_item.keys():
+                            if key != column:
+                                related_column = key
+                                break
+                        
+                        if related_column and related_column in column_names:
+                            # Build OR conditions for each mismatch pair
+                            mismatch_conditions = []
+                            for mismatch_pair in mismatch_data:
+                                mismatch_conditions.append(
+                                    f'("{column}" = %s AND "{related_column}" = %s)'
+                                )
+                                where_params.append(mismatch_pair.get(column))
+                                where_params.append(mismatch_pair.get(related_column))
+                            
+                            # Join with OR
+                            where_conditions.append(f'({" OR ".join(mismatch_conditions)})')
+                except (json.JSONDecodeError, AttributeError, KeyError) as e:
+                    # If JSON parsing fails, skip this filter
+                    continue
         
         if where_conditions:
             return f' WHERE {" AND ".join(where_conditions)}', where_params
@@ -2008,6 +2394,8 @@ class GetTableDataView(APIView):
                     # Validate that the sort column exists in the table
                     order_by_clause = f' ORDER BY "{sort_column}" {sort_direction.upper()}'
                 
+                
+
                 # Get paginated data from the table with filtering and sorting
                 query = f'SELECT * FROM {table_reference}{where_clause}{order_by_clause} LIMIT %s OFFSET %s;'
                 cursor.execute(query, where_params + [page_size, offset])
@@ -2020,12 +2408,12 @@ class GetTableDataView(APIView):
                 for row in rows:
                     row_dict = {}
                     for i, value in enumerate(row):
-                        # Convert datetime objects to string for JSON serialization
-                        if hasattr(value, 'isoformat'):
-                            row_dict[column_names[i]] = value.isoformat()
-                        else:
-                            row_dict[column_names[i]] = value
+                        row_dict[column_names[i]] = value
                     data.append(row_dict)
+                
+                # Format date/timestamp columns based on user's preferred date format
+                user_strftime_format = convert_user_date_format_to_strftime(user.date_format)
+                data = format_date_columns(data, columns, user_strftime_format)
                 
                 # Check if table has primary key
                 cursor.execute("""
@@ -2269,11 +2657,12 @@ class PreviewTableDataView(APIView):
             file_extension = uploaded_file.name.lower().split('.')[-1]
             
             # Read file into pandas DataFrame
+            # Don't use dtype=str to preserve datetime types
             uploaded_file.seek(0)
             if file_extension == 'csv':
-                df = pd.read_csv(uploaded_file, encoding='utf-8', dtype=str, keep_default_na=False)
+                df = pd.read_csv(uploaded_file, encoding='utf-8', keep_default_na=True)
             elif file_extension in ['xls', 'xlsx']:
-                df = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str, keep_default_na=False)
+                df = pd.read_excel(uploaded_file, engine='openpyxl', keep_default_na=True)
             else:
                 return Response(
                     {"error": "Unsupported file format. Please upload .csv or .xls/.xlsx file."},
@@ -2283,7 +2672,7 @@ class PreviewTableDataView(APIView):
             # Remove empty rows from DataFrame
             df = self._remove_empty_rows(df)
             
-            # Clean DataFrame and fix phone number scientific notation
+            # Clean DataFrame
             df_clean = df.where(pd.notnull(df), None)
             
             # Fix scientific notation for all columns that might contain it
@@ -2360,6 +2749,85 @@ class UploadTableDataView(APIView):
         Remove duplicates from new data
         """
         return new_df.drop_duplicates()
+    
+    def _detect_date_format(self, series):
+        """
+        Detect the consistent date format for a column by analyzing unambiguous dates.
+        Returns the format string that should be used, or None if no format detected.
+        """
+        non_null_values = series.dropna()
+        if len(non_null_values) == 0:
+            return None
+        
+        # Sample for performance
+        sample = non_null_values.head(100) if len(non_null_values) > 100 else non_null_values
+        
+        # Try each format and score based on successful conversions
+        formats_to_try = [
+            '%Y-%m-%d',                  # 2024-01-15
+            '%m/%d/%Y',                  # 01/15/2024 (US format - month first)
+            '%d/%m/%Y',                  # 15/01/2024 (European format - day first)
+            '%m-%d-%Y',                  # 01-15-2024 (US format - month first)
+            '%d-%m-%Y',                  # 15-01-2024 (European format - day first)
+            '%Y/%m/%d',                  # 2024/01/15
+            '%Y%m%d',                    # 20240115
+            '%d.%m.%Y',                  # 15.01.2024
+            '%Y-%m-%d %H:%M:%S',         # 2024-01-15 14:30:00
+            '%m/%d/%Y %H:%M:%S',         # 01/15/2024 14:30:00
+            '%d/%m/%Y %H:%M:%S',         # 15/01/2024 14:30:00
+            '%m-%d-%Y %H:%M:%S',         # 01-15-2024 14:30:00
+            '%d-%m-%Y %H:%M:%S',         # 15-01-2024 14:30:00
+            '%Y-%m-%d %H:%M:%S.%f',      # 2024-01-15 14:30:00.123456
+            '%m-%d-%Y %H:%M:%S.%f',      # 01-15-2024 14:30:00.123456
+            '%d-%m-%Y %H:%M:%S.%f',      # 15-01-2024 14:30:00.123456
+            '%m/%d/%Y %H:%M:%S.%f',      # 01/15/2024 14:30:00.123456
+            '%d/%m/%Y %H:%M:%S.%f',      # 15/01/2024 14:30:00.123456
+        ]
+        
+        best_format = None
+        best_score = 0
+        
+        for fmt in formats_to_try:
+            try:
+                converted = pd.to_datetime(sample, format=fmt, errors='coerce')
+                success_count = converted.notna().sum()
+                
+                # Calculate success rate
+                if success_count > best_score:
+                    best_score = success_count
+                    best_format = fmt
+            except (ValueError, TypeError):
+                continue
+        
+        # Return format if at least 60% success rate
+        if best_score / len(sample) > 0.6:
+            return best_format
+        
+        return None
+    
+    def _convert_datetime_value(self, value, column_type):
+        """
+        Convert datetime value to appropriate format for database insertion.
+        Handles both DATE and TIMESTAMP types.
+        """
+        if pd.isna(value) or value == '' or value is None:
+            return None
+        
+        try:
+            # Convert to datetime using pandas
+            dt = pd.to_datetime(value, errors='coerce', infer_datetime_format=True)
+            
+            if pd.isna(dt):
+                return None
+            
+            # Convert pandas Timestamp to Python datetime
+            if isinstance(dt, pd.Timestamp):
+                dt = dt.to_pydatetime()
+            
+            # Return the datetime object (PostgreSQL will handle the conversion)
+            return dt
+        except Exception:
+            return None
         
 
     def _remove_empty_rows(self, df):
@@ -2452,11 +2920,12 @@ class UploadTableDataView(APIView):
             file_extension = uploaded_file.name.lower().split('.')[-1]
             
             # Read file into pandas DataFrame
+            # Don't use dtype=str to preserve datetime types
             uploaded_file.seek(0)
             if file_extension == 'csv':
-                df = pd.read_csv(uploaded_file, encoding='utf-8', dtype=str, keep_default_na=False)
+                df = pd.read_csv(uploaded_file, encoding='utf-8', keep_default_na=True)
             elif file_extension in ['xls', 'xlsx']:
-                df = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str, keep_default_na=False)
+                df = pd.read_excel(uploaded_file, engine='openpyxl', keep_default_na=True)
             else:
                 return Response(
                     {"error": "Unsupported file format. Please upload .csv or .xls/.xlsx file."},
@@ -2466,7 +2935,7 @@ class UploadTableDataView(APIView):
             # Remove empty rows from DataFrame
             df = self._remove_empty_rows(df)
             
-            # Clean DataFrame and fix phone number scientific notation
+            # Clean DataFrame
             df_clean = df.where(pd.notnull(df), None)
             
             # Check for reserved field names in the uploaded file
@@ -2485,7 +2954,7 @@ class UploadTableDataView(APIView):
             
             # Note: Scientific notation fix will be applied later based on actual database column types
             
-            # Get table structure to match columns
+            # Get table structure to match columns and detect datetime columns
             customer_connection = psycopg2.connect(
                 host=settings.DATABASES['default']['HOST'],
                 port=settings.DATABASES['default']['PORT'],
@@ -2575,8 +3044,22 @@ class UploadTableDataView(APIView):
                         {"error": "No matching columns found between file and table."},
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                # Use the original data (no truncation needed)
                 
+                # Convert datetime columns using detected format for consistency
+                for db_col, file_col in column_mapping.items():
+                    db_col_info = column_info.get(db_col, {})
+                    db_data_type = db_col_info.get('data_type', '').lower()
+                    
+                    # If this column is date/timestamp type, convert it consistently
+                    if db_data_type in ['date', 'timestamp', 'timestamp without time zone', 'timestamp with time zone']:
+                        # Detect format and convert
+                        detected_format = self._detect_date_format(df_clean[file_col])
+                        if detected_format:
+                            df_clean[file_col] = pd.to_datetime(df_clean[file_col], format=detected_format, errors='coerce')
+                        else:
+                            df_clean[file_col] = pd.to_datetime(df_clean[file_col], errors='coerce', infer_datetime_format=True)
+                
+                # Use the original data (no truncation needed)
                 processed_df = df_clean
                 
                 # Prepare data for insertion
@@ -2594,19 +3077,24 @@ class UploadTableDataView(APIView):
                         
                         if pd.isna(val):
                             row_data.append(None)
-                        elif isinstance(val, pd.Timestamp):
-                            row_data.append(val.to_pydatetime())
                         else:
-                            # Apply scientific notation fix based on database column type
+                            # Get database column information
                             db_col_info = column_info.get(db_col, {})
-                            db_data_type = db_col_info.get('data_type', '')
+                            db_data_type = db_col_info.get('data_type', '').lower()
                             
-                            # Check if this is a numeric column that might have scientific notation
-                            if db_data_type and any(numeric_type in db_data_type.lower() for numeric_type in ['bigint', 'integer', 'smallint', 'numeric', 'decimal', 'real', 'double']):
-                                val = self._fix_scientific_notation(val, db_data_type)
-                            
-                            # Send raw string value - let PostgreSQL handle type validation
-                            row_data.append(str(val))
+                            # Handle date/timestamp columns
+                            if db_data_type in ['date', 'timestamp', 'timestamp without time zone', 'timestamp with time zone']:
+                                row_data.append(self._convert_datetime_value(val, db_data_type))
+                            elif isinstance(val, pd.Timestamp):
+                                row_data.append(val.to_pydatetime())
+                            else:
+                                # Apply scientific notation fix based on database column type
+                                # Check if this is a numeric column that might have scientific notation
+                                if db_data_type and any(numeric_type in db_data_type for numeric_type in ['bigint', 'integer', 'smallint', 'numeric', 'decimal', 'real', 'double']):
+                                    val = self._fix_scientific_notation(val, db_data_type)
+                                
+                                # Send raw string value - let PostgreSQL handle type validation
+                                row_data.append(str(val))
                     
                     # Add __active = True for all rows
                     row_data.append(True)
@@ -2946,10 +3434,7 @@ class EditTableRecordView(APIView):
                 validation_errors = []
                 columns = list(record_data.keys())
                 
-                # Debug logging
-                print(f"Debug: Table: {table_name}, PK Column: {pk_column}")
-                print(f"Debug: Record data keys: {columns}")
-                print(f"Debug: Record data: {record_data}")
+    
                 
                 # Check if primary key is included
                 if pk_column not in columns:
@@ -2963,18 +3448,18 @@ class EditTableRecordView(APIView):
                     if col_name == pk_column:
                         continue  # Skip primary key validation
                     
-                    print(f"Debug: Validating column '{col_name}' with value: {col_value} (type: {type(col_value)})")
+       
                     
                     if col_name not in column_info:
                         validation_errors.append(f"Column '{col_name}' does not exist in table '{table_name}'")
                         continue
                     
                     col_info = column_info[col_name]
-                    print(f"Debug: Column info for '{col_name}': {col_info}")
+                    
                     
                     # Handle NULL/empty values
                     is_null_or_empty = (col_value is None or col_value == '' or str(col_value).strip() == '')
-                    print(f"Debug: Is null or empty: {is_null_or_empty}")
+                    
                     
                     if is_null_or_empty:
                         # Check if column allows NULL values
@@ -2982,20 +3467,20 @@ class EditTableRecordView(APIView):
                             validation_errors.append(f"Column '{col_name}' cannot be NULL or empty")
                         # Convert empty strings to None for database
                         record_data[col_name] = None
-                        print(f"Debug: Converted '{col_name}' to None")
+                        
                         continue
                     
                     # Validate data type for non-null values
                     type_error = self._validate_data_type(col_name, col_value, col_info['data_type'])
                     if type_error:
                         validation_errors.append(type_error)
-                        print(f"Debug: Type validation error: {type_error}")
+                        
                     
                     # Validate field length for character types
                     if col_info['max_length'] and col_info['data_type'] in ['character varying', 'character', 'text']:
                         if len(str(col_value)) > col_info['max_length']:
                             validation_errors.append(f"Column '{col_name}' value exceeds maximum length of {col_info['max_length']} characters")
-                            print(f"Debug: Length validation error for '{col_name}'")
+                            
                 
                 # Return validation errors if any
                 if validation_errors:
@@ -3703,7 +4188,7 @@ class CreateTableWithoutRecordsView(APIView):
         scope = request.data.get('scope')
         schema = request.data.get('schema')
 
-        print(f"Debug - table_name: {table_name}, columns: {columns}, scope: {scope}, schema: {schema},[[[[[[[[[[[[[[]]]]]]]]]]]]]]") 
+    
 
         if not table_name or not columns or not schema:
             return Response(
@@ -3878,6 +4363,7 @@ class DownloadTableDataView(APIView):
             sort_column = request.data.get('sort_column', '')
             sort_direction = request.data.get('sort_direction', 'asc')
             file_format = request.data.get('format', 'csv').lower()  # Default to CSV
+            selected_columns = request.data.get('selected_columns', None)  # Get selected columns
             
             if not table_name:
                 return Response(
@@ -3951,6 +4437,27 @@ class DownloadTableDataView(APIView):
                         status=status.HTTP_404_NOT_FOUND
                     )
                 
+                # Filter columns based on selected_columns if provided
+                if selected_columns and isinstance(selected_columns, list) and len(selected_columns) > 0:
+                    # Create a dictionary for quick lookup
+                    columns_dict = {col[0]: col for col in table_columns}
+                    
+                    # Filter and reorder table_columns to match selected_columns order
+                    filtered_columns = []
+                    for col_name in selected_columns:
+                        if col_name in columns_dict:
+                            filtered_columns.append(columns_dict[col_name])
+                    
+                    table_columns = filtered_columns
+                    
+                    # If no columns match after filtering, return error
+                    if not table_columns:
+                        customer_connection.close()
+                        return Response(
+                            {"error": "None of the selected columns exist in the table."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
                 # Build WHERE clause for filters
                 where_conditions = []
                 filter_params = []
@@ -3988,6 +4495,39 @@ class DownloadTableDataView(APIView):
                                     placeholders = ','.join(['%s'] * len(values_list))
                                     where_conditions.append(f'"{column}" NOT IN ({placeholders})')
                                     filter_params.extend(values_list)
+                        elif operator == 'IS NULL':
+                            where_conditions.append(f'"{column}" IS NULL')
+                        elif operator == 'IS NOT NULL':
+                            where_conditions.append(f'"{column}" IS NOT NULL')
+                        elif operator == 'MISMATCH':
+                            # Handle MISMATCH operator - value contains JSON string with mismatch pairs
+                            try:
+                                import json
+                                mismatch_data = json.loads(value) if isinstance(value, str) else value
+                                if isinstance(mismatch_data, list) and len(mismatch_data) > 0:
+                                    # Get the first item to determine related column name
+                                    first_item = mismatch_data[0]
+                                    related_column = None
+                                    for key in first_item.keys():
+                                        if key != column:
+                                            related_column = key
+                                            break
+                                    
+                                    if related_column:
+                                        # Build OR conditions for each mismatch pair
+                                        mismatch_conditions = []
+                                        for mismatch_pair in mismatch_data:
+                                            mismatch_conditions.append(
+                                                f'("{column}" = %s AND "{related_column}" = %s)'
+                                            )
+                                            filter_params.append(mismatch_pair.get(column))
+                                            filter_params.append(mismatch_pair.get(related_column))
+                                        
+                                        # Join with OR
+                                        where_conditions.append(f'({" OR ".join(mismatch_conditions)})')
+                            except (json.JSONDecodeError, AttributeError, KeyError) as e:
+                                # If JSON parsing fails, skip this filter
+                                continue
                         else:
                             where_conditions.append(f'"{column}" {operator} %s')
                             filter_params.append(value)
@@ -4018,13 +4558,30 @@ class DownloadTableDataView(APIView):
                 # Get headers
                 headers = [col[0] for col in table_columns]
                 
+                # Convert rows to list of dictionaries for date formatting
+                data = []
+                for row in rows:
+                    row_dict = {}
+                    for i, value in enumerate(row):
+                        row_dict[headers[i]] = value
+                    data.append(row_dict)
+                
+                # Format date/timestamp columns based on user's preferred date format
+                user_strftime_format = convert_user_date_format_to_strftime(user.date_format)
+                data = format_date_columns(data, table_columns, user_strftime_format)
+                
+                # Convert back to rows format
+                formatted_rows = []
+                for row_dict in data:
+                    formatted_rows.append([row_dict.get(header) for header in headers])
+                
                 # Generate file content based on format
                 if file_format in ['csv']:
-                    file_content, content_type, file_extension = self._generate_csv(headers, rows)
+                    file_content, content_type, file_extension = self._generate_csv(headers, formatted_rows)
                 elif file_format in ['excel', 'xlsx']:
-                    file_content, content_type, file_extension = self._generate_excel(headers, rows)
+                    file_content, content_type, file_extension = self._generate_excel(headers, formatted_rows)
                 elif file_format == 'tsv':
-                    file_content, content_type, file_extension = self._generate_tsv(headers, rows)
+                    file_content, content_type, file_extension = self._generate_tsv(headers, formatted_rows)
             
             customer_connection.close()
             
@@ -4256,6 +4813,52 @@ class LogoutView(APIView):
             return Response({
                 'error': f'Logout failed: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    
+class RefreshTokenView(APIView):
+    """
+    API endpoint to refresh access token using the refresh token stored in an HttpOnly cookie.
+    """
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        try:
+            refresh_token = request.COOKIES.get('refresh_token')
+            if not refresh_token:
+                return Response({'error': 'Refresh token missing'}, status=status.HTTP_401_UNAUTHORIZED)
+
+            serializer = TokenRefreshSerializer(data={'refresh': refresh_token})
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+
+            response = Response({'message': 'Token refreshed successfully'}, status=status.HTTP_200_OK)
+
+            # Set new access token
+            response.set_cookie(
+                key='access_token',
+                value=data.get('access'),
+                httponly=True,
+                secure=False,  # Set to True in production with HTTPS
+                samesite='Lax',
+                max_age=3600
+            )
+
+            # If rotation is enabled, a new refresh may be returned; update cookie
+            new_refresh = data.get('refresh')
+            if new_refresh:
+                response.set_cookie(
+                    key='refresh_token',
+                    value=new_refresh,
+                    httponly=True,
+                    secure=False,
+                    samesite='Lax',
+                    max_age=86400
+                )
+
+            return response
+        except Exception as e:
+            return Response({'error': f'Invalid or expired refresh token: {str(e)}'}, status=status.HTTP_401_UNAUTHORIZED)
 
     
 class TruncateTableView(APIView):
@@ -4651,8 +5254,10 @@ def get_column_info(column_name):
     """
     with open('column_categories.json', 'r') as f:
         column_categories = json.load(f)
-        for category, columns in column_categories.items():
-            if column_name.lower() in columns:
+        for category, value in column_categories.items():
+            if isinstance(value,list) and column_name in value:
+                return category
+            elif isinstance(value,dict) and "columns" in value and column_name in value["columns"]:
                 return category
     return None
  
@@ -4660,7 +5265,7 @@ def get_column_info(column_name):
  # Helper function for column statistics
 def get_category_columns(column_name):
     """
-    Get category from column_categories.json
+    Get category columns from column_categories.json
     """
     with open('column_categories.json', 'r') as f:
         column_categories = json.load(f)
@@ -4688,7 +5293,7 @@ def check_columns_in_table(cursor, schema, table_name, category_columns):
     cursor.execute(query, [schema, table_name] + category_columns)
     existing_columns = [row[0] for row in cursor.fetchall()]
 
-    if len(existing_columns) == 1:
+    if len(existing_columns) > 0:
         return existing_columns[0]
     return None
 
@@ -4696,14 +5301,14 @@ class ColumnStatisticsView(APIView):
     """
     API endpoint for getting column statistics.
     """
-    # authentication_classes = [JWTCookieAuthentication]
-    # permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTCookieAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         column_name = request.data.get('column_name')
         table_name = request.data.get('table_name')
         schema = request.data.get('schema')
-        user_email = request.data.get('user')
+        # user_email = request.data.get('user')
 
         if not column_name or not table_name or not schema:
             return Response(
@@ -4718,8 +5323,8 @@ class ColumnStatisticsView(APIView):
                 {"error": "Column category not found."},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        # user = request.user
-        user=User.objects.get(email=user_email)
+        user = request.user
+        # user=User.objects.get(email=user_email)
         customer = user.cust_id
         if not customer:
             return Response(
@@ -4787,7 +5392,6 @@ class ColumnStatisticsView(APIView):
                     """)
                     
                     distinct_values = cursor.fetchall()
-                    
                     return Response({
                         "column_name": column_name,
                         "column_category": column_category,
@@ -4818,21 +5422,12 @@ class ColumnStatisticsView(APIView):
                     null_count = df[column_name].isnull().sum()
                     non_null_count = df[column_name].notna().sum()
                     
-                    # Get distinct values and their counts
-                    distinct_values = df[column_name].value_counts().reset_index()
-                    distinct_values.columns = ['value', 'count']
-                    distinct_values = distinct_values.sort_values('value')
-                    
-                    # Convert to list of dictionaries
-                    distinct_values_list = [
-                        {"value": str(row['value']), "count": int(row['count'])} 
-                        for _, row in distinct_values.iterrows()
-                    ]
-                    
-                    # Count invalid dates using pandas
+                    # Count invalid dates and get min/max dates using pandas
                     non_null_data = df[column_name].dropna()
                     invalid_dates = []
                     invalid_date_count = 0
+                    min_date = None
+                    max_date = None
                     
                     if len(non_null_data) > 0:
                         # Convert to datetime with errors='coerce' - invalid dates become NaT
@@ -4841,6 +5436,13 @@ class ColumnStatisticsView(APIView):
                         # Find invalid dates (where conversion resulted in NaT)
                         invalid_mask = converted_dates.isnull()
                         invalid_date_count = invalid_mask.sum()
+                        
+                        # Get valid dates (non-NaT)
+                        valid_dates = converted_dates.dropna()
+                        
+                        if len(valid_dates) > 0:
+                            min_date = str(valid_dates.min())
+                            max_date = str(valid_dates.max())
                         
                     # Get the actual invalid date values for display
                     if invalid_date_count > 0:
@@ -4855,7 +5457,8 @@ class ColumnStatisticsView(APIView):
                             "total_count": int(total_count),
                             "null_count": int(null_count),
                             "non_null_count": int(non_null_count),
-                            "distinct_values": distinct_values_list,
+                            "min_date": min_date,
+                            "max_date": max_date,
                             "invalid_date_count": int(invalid_date_count),
                             "invalid_dates": invalid_dates
                         }
@@ -4871,7 +5474,16 @@ class ColumnStatisticsView(APIView):
                     # Fetch all data and create DataFrame
                     data = cursor.fetchall()
                     df = pd.DataFrame(data, columns=[column_name])
-                    
+                    # Check if maximum character length in this column is more than three
+                    max_char_len = df[column_name].dropna().astype(str).apply(len).max() if not df.empty else 0
+
+                    if max_char_len > 3:
+                        return Response(
+                            {"error": "Maximum character length in this column is less than three."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+
+                      
                     # Basic statistics - null count and invalid country codes
                     null_count = df[column_name].isnull().sum()
                     
@@ -4892,8 +5504,6 @@ class ColumnStatisticsView(APIView):
                     if len(non_null_data) > 0:
                         # Get all valid ISO 3166-1 Alpha-3 country codes
                         valid_country_codes = {country.alpha_2 for country in pycountry.countries} | {country.alpha_3 for country in pycountry.countries}
-                        
-                        print(sorted(valid_country_codes))
 
                         # Convert to string and strip whitespace, then to uppercase
                         non_null_data_str = non_null_data.astype(str).str.strip().str.upper()
@@ -4909,47 +5519,7 @@ class ColumnStatisticsView(APIView):
                         invalid_country_codes = non_null_data_str[invalid_mask].unique().tolist()
                         invalid_country_code_count = len(invalid_country_codes)
 
-                    # category_columns = get_category_columns('country_code')
-
-                    # column_in_table = check_columns_in_table(cursor, schema, table_name, category_columns)
-                    # if column_in_table:
-
-                    #     cursor.execute(f"""
-                    #         SELECT "{column_in_table}","{column_name}"
-                    #         FROM "{schema}"."{table_name}"
-                    #     """)
-                    #     data = cursor.fetchall()
-                    #     df = pd.DataFrame(data, columns=[column_in_table, column_name])
-
-                    #     # Create mapping from country name to country code
-                    #     code_to_name = {country.name.upper():country.alpha_3 for country in pycountry.countries}
-
-
-                    #     # Process data similar to invalid_country_code_count pattern
-                    #     non_null_data = df.dropna()
-                    #     mismatched_country_codes = []
-                    #     mismatched_country_code_count = 0
-
-                        # if len(non_null_data) > 0:
-                            
-                        #     # Convert country names to uppercase for comparison
-                        #     country_names_upper = non_null_data[column_in_table].astype(str).str.strip().str.upper()
-                        #     country_codes_upper = non_null_data[column_name].astype(str).str.strip().str.upper()
-
-                        #     # Get expected country codes for each country name
-                        #     expected_codes = country_names_upper.map(code_to_name)
-                            
-                        #     # Find mismatches where actual code != expected code
-                        #     mismatch_mask = expected_codes.notna() & (expected_codes != country_codes_upper)
-
-                        #     # Extract original values (exactly as fetched from DB) for mismatched rows
-                        #     mismatched_country_codes = non_null_data.loc[mismatch_mask, column_name].unique().tolist()
-                        #     mismatched_country_code_count = len(mismatched_country_codes)
-
-
-                        #     # If there's an error in mismatch checking, set defaults
-                        #     mismatched_country_codes = []
-                        #     mismatched_country_code_count = 0
+                   
                      
                     return Response({
                         "column_name": column_name,
@@ -4978,7 +5548,7 @@ class ColumnStatisticsView(APIView):
                     null_count = df[column_name].isnull().sum()
                     
                     # Get distinct currency codes and their counts
-                    currency_counts = df[column_name].dropna().astype(str).str.strip().str.upper().value_counts()
+                    currency_counts = df[column_name].dropna().astype(str).str.strip().value_counts()
                     distinct_currencies = [
                         {"value": code, "count": int(count)}
                         for code, count in currency_counts.items()
@@ -4988,14 +5558,11 @@ class ColumnStatisticsView(APIView):
                     non_null_data = df[column_name].dropna()
                     invalid_currency_codes = []
                     invalid_currency_code_count = 0
-                    mismatched_currency_codes = []
-                    mismatched_currency_code_count = 0
                     
                     if len(non_null_data) > 0:
                         # Get all valid currency codes from pycountry
                         valid_currencies = {currency.alpha_3 for currency in pycountry.currencies}
 
-                        print(sorted(valid_currencies))
                         
                         # Convert to string and strip whitespace, then to uppercase
                         non_null_data_str = non_null_data.astype(str).str.strip().str.upper()
@@ -5007,57 +5574,7 @@ class ColumnStatisticsView(APIView):
                         invalid_currency_codes = non_null_data[not_in_valid_mask].unique().tolist()
                         invalid_currency_code_count = len(invalid_currency_codes)
                         
-                        # Check for currency-country code mismatches if country_code column exists
-                        country_columns = get_category_columns('country_code')
-                        if country_columns:
-                            country_column_in_table = check_columns_in_table(cursor, schema, table_name, country_columns)
-                            if country_column_in_table:
-                                try:
-                                    # Get data for both currency and country columns
-                                    cursor.execute(f"""
-                                        SELECT "{country_column_in_table}", "{column_name}"
-                                        FROM "{schema}"."{table_name}"
-                                        WHERE "{column_name}" IS NOT NULL AND "{country_column_in_table}" IS NOT NULL
-                                    """)
-                                    currency_country_data = cursor.fetchall()
-                                    
-                                    if currency_country_data:
-                                        df_currency_country = pd.DataFrame(currency_country_data, columns=[country_column_in_table, column_name])
-                                        
-                                        # Create mapping from country code to currency code (alpha_3 only)
-                                        country_to_currency = {}
-                                        for country in pycountry.countries:
-                                            currency_obj = pycountry.currencies.get(numeric=country.numeric)
-                                            if currency_obj is not None:
-                                                # Map BOTH alpha_2 and alpha_3 country code to currency alpha_3 code
-                                                if hasattr(country, 'alpha_2'):
-                                                    country_to_currency[country.alpha_2.upper()] = currency_obj.alpha_3
-                                                if hasattr(country, 'alpha_3'):
-                                                    country_to_currency[country.alpha_3.upper()] = currency_obj.alpha_3
-                                        
-                                        # Process data for mismatch checking
-                                        non_null_currency_country = df_currency_country.dropna()
-                                        
-                                        if len(non_null_currency_country) > 0:
-                                            # Convert to uppercase for comparison
-                                            country_codes_upper = non_null_currency_country[country_column_in_table].astype(str).str.strip().str.upper()
-                                            currency_codes_upper = non_null_currency_country[column_name].astype(str).str.strip().str.upper()
-                                            
-                                            # Get expected currency codes for each country code
-                                            expected_currencies = country_codes_upper.map(country_to_currency)
-                                            
-                                            # Find mismatches where actual currency != expected currency
-                                            mismatch_mask = expected_currencies.notna() & (expected_currencies != currency_codes_upper)
-                                            
-                                            # Extract unique mismatched currency codes
-                                            mismatched_currency_codes = currency_codes_upper[mismatch_mask].unique().tolist()
-                                            mismatched_currency_code_count = len(mismatched_currency_codes)
-                                            
-                                except Exception as e:
-                                    # If there's an error in mismatch checking, set defaults
-                                    mismatched_currency_codes = []
-                                    mismatched_currency_code_count = 0
-                    
+    
                     return Response({
                         "column_name": column_name,
                         "column_category": column_category,
@@ -5065,19 +5582,734 @@ class ColumnStatisticsView(APIView):
                             "null_count": int(null_count),
                             "invalid_currency_code_count": int(invalid_currency_code_count),
                             "invalid_currency_codes": invalid_currency_codes,
-                            "mismatched_currency_code_count": int(mismatched_currency_code_count),
-                            "mismatched_currency_codes": mismatched_currency_codes,
                             "distinct_currencies": distinct_currencies
                         }
                     })
+                elif column_category == 'region_category':
+                    # First check if country_column_in_table exists
+                    country_columns = get_category_columns('country_code')
+                    country_column_in_table = None
+                    if country_columns:
+                        country_column_in_table = check_columns_in_table(cursor, schema, table_name, country_columns)
+                    
+                    # Only proceed with validation if country_column_in_table exists
+                    if country_column_in_table:
+                        # Load data using pandas for better region code analysis
+                        cursor.execute(f"""
+                            SELECT "{country_column_in_table}", "{column_name}"
+                            FROM "{schema}"."{table_name}"
+                        """)
+                        # Fetch all data and create DataFrame
+                        data = cursor.fetchall()
+                        df = pd.DataFrame(data, columns=[country_column_in_table, column_name])
 
-                else:
-                    return None
+                        # Basic statistics - null count
+                        null_count = df[column_name].isnull().sum()
+                        
+                        # Validate region codes
+                        non_null_data = df[column_name].dropna()
+                        invalid_region_codes = []
+                        invalid_region_code_count = 0
+                        mismatched_region_codes = []
+                        mismatched_region_code_count = 0
+
+                        if len(non_null_data) > 0:
+                            # Get all valid subdivision codes from pycountry
+                            valid_subdivisions = set()
+                            for subdivision in pycountry.subdivisions:
+                                if hasattr(subdivision, 'code'):
+                                    valid_subdivisions.add(subdivision.code.upper().split('-')[-1])
+
+                            # Convert to string and strip whitespace, then to uppercase
+                            non_null_data_str = non_null_data.astype(str).str.strip().str.upper()
+                            
+                            # Check validity of region codes
+                            not_in_valid_mask = ~non_null_data_str.isin(valid_subdivisions)
+                            
+                            # Extract unique invalid region codes (original values as fetched from DB)
+                            invalid_region_codes = non_null_data[not_in_valid_mask].unique().tolist()
+                            invalid_region_code_count = len(invalid_region_codes)
+                            
+                            # Check for region-country code mismatches
+                            try:
+                                # Get data for both region and country columns where both are not null
+                                cursor.execute(f"""
+                                    SELECT "{country_column_in_table}", "{column_name}"
+                                    FROM "{schema}"."{table_name}"
+                                    WHERE "{column_name}" IS NOT NULL AND "{country_column_in_table}" IS NOT NULL
+                                """)
+                                region_country_data = cursor.fetchall()
+                                
+                                if region_country_data:
+                                    df_region_country = pd.DataFrame(region_country_data, columns=[country_column_in_table, column_name])
+                                    
+                                    # Create mapping from country code to valid region codes
+                                    country_to_regions = {}
+                                    for subdivision in pycountry.subdivisions:
+                                        if hasattr(subdivision, 'country_code') and hasattr(subdivision, 'code'):
+                                            country_code = subdivision.country_code.upper()
+                                            region_code = subdivision.code.upper().split('-')[-1]
+                                            if country_code not in country_to_regions:
+                                                country_to_regions[country_code] = set()
+                                            country_to_regions[country_code].add(region_code)
+                                    
+                                    # Process data for mismatch checking
+                                    non_null_region_country = df_region_country.dropna()
+                                    
+                                    if len(non_null_region_country) > 0:
+                                        # Convert country values to alpha_2 codes using bulk conversion
+                                        country_values = non_null_region_country[country_column_in_table].astype(str).str.strip()
+                                        country_values_list = country_values.tolist()
+                                        # Bulk convert using country_converter
+                                        country_codes_alpha2 = cc.convert(country_values_list, to='ISO2', not_found=None)
+                                        country_codes_alpha2 = pd.Series(country_codes_alpha2)
+                                        
+                                        # Convert to uppercase for comparison
+                                        country_codes_upper = country_codes_alpha2.astype(str).str.upper()
+                                        region_codes_upper = non_null_region_country[column_name].astype(str).str.strip().str.upper()
+                                        
+                                        # Find mismatches where region code doesn't belong to the country
+                                        mismatch_records = []
+                                        for idx, row in non_null_region_country.iterrows():
+                                            country_code = country_codes_upper.iloc[idx]
+                                            region_code = region_codes_upper.iloc[idx]
+                                            
+                                            # Skip if country conversion failed (None or 'NONE')
+                                            if country_code and country_code != 'NONE' and country_code in country_to_regions:
+                                                if region_code not in country_to_regions[country_code]:
+                                                    mismatch_records.append({
+                                                        column_name: row[column_name],
+                                                        country_column_in_table: row[country_column_in_table]
+                                                    })
+                                        
+                                        # Get unique mismatched combinations
+                                        if mismatch_records:
+                                            df_mismatches = pd.DataFrame(mismatch_records)
+                                            mismatched_region_codes = (
+                                                df_mismatches
+                                                .drop_duplicates()
+                                                .to_dict('records')
+                                            )
+                                            mismatched_region_code_count = len(mismatched_region_codes)
+                                        
+                            except Exception as e:
+                                # If there's an error in mismatch checking, set defaults
+                                mismatched_region_codes = []
+                                mismatched_region_code_count = 0
+                            
+                            # Get distinct regions grouped by country
+                            regions_counts = df.groupby([country_column_in_table, column_name]).size()
+                            distinct_regions = [
+                                {
+                                    "value": {
+                                        country_column_in_table: str(country_val),
+                                        column_name: str(region_val)
+                                    },
+                                    "count": int(count)
+                                }
+                                for (country_val, region_val), count in regions_counts.items()
+                            ]
+
+                        return Response({
+                            "column_name": column_name,
+                            "column_category": column_category,
+                            "column_in_table": country_column_in_table,
+                            "statistics": {
+                                "null_count": int(null_count),
+                                "total_count": len(df),
+                                "distinct_regions": distinct_regions,
+                                "invalid_region_category_count": invalid_region_code_count,
+                                "invalid_region_categories": invalid_region_codes,
+                                "mismatched_region_category_count": int(mismatched_region_code_count),
+                                "mismatched_region_categories": mismatched_region_codes
+                            }
+                        })
+                    else:
+                        # If country_column_in_table doesn't exist, return response indicating it's required
+                        return Response({
+                            "column_name": column_name,
+                            "column_category": column_category,
+                            "column_in_table": None,
+                            "error": "country_column_in_table is required for region_category validation"
+                        }, status=400)
+
+                elif column_category == 'postal_code':
+                    # First check if country_code column exists in the table
+                    country_columns = get_category_columns('country_code')
+                    country_column_in_table = None
+                    if country_columns:
+                        country_column_in_table = check_columns_in_table(cursor, schema, table_name, country_columns)
+                    
+                    # Check if country column exists
+                    if country_column_in_table:
+                        # Load both country_code and postal_code columns together
+                        print(country_column_in_table, column_name)
+                        cursor.execute(f"""
+                            SELECT "{country_column_in_table}", "{column_name}"
+                            FROM "{schema}"."{table_name}"
+                        """)
+                        data = cursor.fetchall()
+                        df = pd.DataFrame(data, columns=[country_column_in_table, column_name])
+
+                        # # Check if maximum character length in postal_code column is more than three
+                        # max_char_len = df[country_column_in_table].dropna().astype(str).apply(len).max() if not df.empty else 0
+
+                        # if max_char_len > 3:
+                        #     return Response(
+                        #         {"error": "Maximum character length in this column is less than three."},
+                        #         status=status.HTTP_400_BAD_REQUEST
+                        #     )
+                        
+                        # Basic statistics
+                        null_count = df[column_name].isnull().sum()
+                        non_null_count = df[column_name].notna().sum()
+                        total_count = len(df)
+
+                        df_postal_country = df.dropna(subset=[country_column_in_table, column_name]).copy()
+                        if len(df_postal_country) > 0:
+                            postal_counts = df_postal_country.groupby([country_column_in_table, column_name]).size()
+                            distinct_postal_codes = [
+                                {
+                                    "value": {
+                                        country_column_in_table: str(country_val),
+                                        column_name: str(postal_val)
+                                    },
+                                    "count": int(count)
+                                }
+                                for (country_val, postal_val), count in postal_counts.items()
+                            ]
+            
+                        
+                        # Get non-null data for validation - both postal_code and country must be present
+                        df_validation = df.dropna(subset=[column_name, country_column_in_table]).copy()
+                        
+                        if len(df_validation) > 0:
+                            # Cache for Nominatim objects
+                            nomi_cache = {}
+
+                            def get_alpha2_country(country):
+                                """Convert country name or code to ISO alpha-2 code."""
+                                if not country:
+                                    return None
+                                country = country.strip()
+                                # If already 2 letters, assume it's alpha-2
+                                if len(country) == 2:
+                                    return country.upper()
+                                try:
+                                    return pycountry.countries.lookup(country).alpha_2
+                                except LookupError:
+                                    return None
+
+                            def is_valid_postal(country_input, postal_code):
+                                try:
+                                    if postal_code is None or str(postal_code).strip() == "":
+                                        return False
+                                    
+                                    country_code = get_alpha2_country(country_input)
+                                    if not country_code:
+                                        return False
+                                    
+                                    # Use cached Nominatim object
+                                    if country_code not in nomi_cache:
+                                        nomi_cache[country_code] = pgeocode.Nominatim(country_code)
+                                    
+                                    nomi = nomi_cache[country_code]
+                                    loc = nomi.query_postal_code(str(postal_code))
+                                    return not pd.isna(loc.get('country_code'))
+                                except:
+                                    return False
+                            df_validation['is_valid'] = df_validation.apply(lambda row: is_valid_postal(row[country_column_in_table], row[column_name]), axis=1)
+
+                            # Step 5: Extract all mismatched records (invalid postal codes)
+                            df_mismatched = df_validation[~df_validation['is_valid']].copy()
+                            
+                            if len(df_mismatched) > 0:
+                                # Get unique mismatched postal codes with their country codes
+                                df_mismatched_unique = df_mismatched[[country_column_in_table, column_name]].drop_duplicates()
+                                mismatched_postal_codes = df_mismatched_unique.to_dict('records')
+                                mismatched_postal_code_count = len(mismatched_postal_codes)
+                            else:
+                                mismatched_postal_codes = []
+                                mismatched_postal_code_count = 0
+                        else:
+                            # No non-null data to validate
+                            mismatched_postal_codes = []
+                            mismatched_postal_code_count = 0
+
+                    
+                    else:
+                        # No country_code column exists - cannot validate without country
+                        return Response({
+                            "error": "country_code column required for postal_code validation"
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    return Response({
+                        "column_name": column_name,
+                        "column_category": column_category,
+                        "column_in_table": country_column_in_table,
+                        "statistics": {
+                            "null_count": int(null_count),
+                            "non_null_count": int(non_null_count),
+                            "total_count": int(total_count),
+                            "distinct_postal_codes": distinct_postal_codes,
+                            "mismatched_postal_code_count": int(mismatched_postal_code_count),
+                            "mismatched_postal_codes": mismatched_postal_codes
+                        }
+                    })
+
+                elif column_category == 'units':
+                    # Load data using pandas for better unit analysis
+                    cursor.execute(f"""
+                        SELECT "{column_name}"
+                        FROM "{schema}"."{table_name}"
+                    """)
+                    
+                    # Fetch all data and create DataFrame
+                    data = cursor.fetchall()
+                    df = pd.DataFrame(data, columns=[column_name])
+                    
+                    # Basic statistics
+                    null_count = df[column_name].isnull().sum()
+                    
+                    # Get distinct units and their counts
+                    unit_counts = df[column_name].dropna().astype(str).str.strip().value_counts()
+                    distinct_values = [
+                        {"value": str(unit), "count": int(count)}
+                        for unit, count in unit_counts.items()
+                    ]
+                    
+                    # Validate units using pint
+                    invalid_units = []
+                    
+                    non_null_data = df[column_name].dropna()
+                    if len(non_null_data) > 0:
+                        # Create UnitRegistry instance
+                        ureg = pint.UnitRegistry()
+                        
+                        # Convert to string and strip whitespace
+                        non_null_data_str = non_null_data.astype(str).str.strip()
+                        
+                        # Function to validate a unit string (case-insensitive)
+                        def is_valid_unit(unit_str):
+                            """Validate if a unit string is a valid pint unit expression"""
+                            try:
+                                # Try to parse the expression in lowercase for validation
+                                ureg.parse_expression(unit_str.lower())
+                                return True
+                            except Exception:
+                                return False
+                        
+                        # Apply validation to each unit
+                        is_valid_mask = non_null_data_str.apply(is_valid_unit)
+                        
+                        # Get invalid units (preserve original case)
+                        invalid_mask = ~is_valid_mask
+                        invalid_units = non_null_data_str[invalid_mask].unique().tolist()
+                    
+                    return Response({
+                        "column_name": column_name,
+                        "column_category": column_category,
+                        "statistics": {
+                            "null_count": int(null_count),
+                            "distinct_values": distinct_values,
+                            "invalid_units": invalid_units
+                        }
+                    })
+                # else:
+                #     cursor.execute(f"""
+                #         SELECT "{column_name}"
+                #         FROM "{schema}"."{table_name}"
+                #     """)
+                    
+                #     # Fetch all data and create DataFrame
+                #     data = cursor.fetchall()
+                #     df = pd.DataFrame(data, columns=[column_name])
+                    
+                #     # Basic statistics
+                #     null_count = df[column_name].isnull().sum() 
+                #     category = get_column_info(column_name)   
+
         except Exception as e:
             return Response({
-                "error": f"Database error: {str(e)}"
+                "error": f"error: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        finally:
-            if 'connection' in locals():
-                connection.close()
+
+class ColumnSequenceListView(APIView):
+    authentication_classes = [JWTCookieAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            table_name = request.query_params.get('table_name')
+            user = request.user
+            customer = user.cust_id
+            if not customer:
+                return Response(
+                    {"error": "User is not associated with any customer."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not table_name:
+                return Response(
+                    {"error": "table_name is required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            customer_connection = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                database=customer.cust_db,
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD']
+            )
+            customer_connection.autocommit = True
+            with customer_connection.cursor() as cursor:
+                sql = """
+                    SELECT seq_name, username, scope
+                    FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s
+                    AND (
+                        username = %s
+                        OR scope = 'G'
+                    )
+                    ORDER BY seq_name
+                """
+                cursor.execute(sql, (table_name, user.email))
+                rows = cursor.fetchall()
+                result = [
+                    {
+                        "seq_name": row[0],
+                        "username": row[1],
+                        "scope": row[2],
+                        "is_owner": row[1] == user.email or row[2] == 'G'  # Global sequences can be edited by anyone
+                    }
+                    for row in rows
+                ]
+            customer_connection.close()
+            return Response({"sequences": result})
+        except Exception as e:
+            return Response({
+                "error": f"error: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+class ColumnSequenceView(APIView):
+    authentication_classes = [JWTCookieAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            table_name = request.query_params.get('table_name')
+            user = request.user
+            customer = user.cust_id
+            if not customer:
+                return Response(
+                    {"error": "User is not associated with any customer."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not table_name:
+                return Response(
+                    {"error": "table_name and schema are required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            customer_connection = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                database=customer.cust_db,
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD']
+            )
+            customer_connection.autocommit = True
+            with customer_connection.cursor() as cursor:
+                # Fetch user-specific sequences and global ones for table
+                sql = f"""
+                    SELECT seq_name, sequence
+                    FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s
+                    AND (
+                        username = %s
+                        OR scope = 'G'
+                    )
+                    ORDER BY 
+                        seq_name
+                """
+                cursor.execute(sql, (table_name, user.email))
+                rows = cursor.fetchall()
+                result = [
+                    {
+                        "seq_name": row[0],
+                        "sequence": row[1],
+                    }
+                    for row in rows
+                ]
+            customer_connection.close()
+            return Response({"sequences": result})
+        except Exception as e:
+            return Response({
+                "error": f"error: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def post(self, request):
+        """Create a new column sequence"""
+        try:
+            table_name = request.data.get('table_name')
+            sequence = request.data.get('sequence')
+            seq_name = request.data.get('seq_name')
+            scope = request.data.get('scope', 'L')  # Default to Local scope
+            user = request.user
+            customer = user.cust_id
+            
+            if not customer:
+                return Response(
+                    {"error": "User is not associated with any customer."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not table_name or not sequence or not seq_name:
+                return Response(
+                    {"error": "table_name, sequence, and seq_name are required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            customer_connection = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                database=customer.cust_db,
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD']  
+            )
+            customer_connection.autocommit = True
+            
+            with customer_connection.cursor() as cursor:
+                # Check if sequence name already exists for this table and user
+                check_sql = """
+                    SELECT seq_name FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s AND seq_name = %s AND username = %s
+                """
+                cursor.execute(check_sql, (table_name, seq_name, user.email))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    customer_connection.close()
+                    return Response(
+                        {"error": f"Sequence name '{seq_name}' already exists for this table."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Insert new sequence
+                sql = """
+                    INSERT INTO "GENERAL"."tbl_col_seq" (username, table_name, sequence, seq_name, scope)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+                cursor.execute(sql, (user.email, table_name, sequence, seq_name, scope))
+            
+            customer_connection.close()
+            return Response({"message": f"Sequence '{seq_name}' created successfully"})
+        except Exception as e:
+            return Response({
+                "error": f"Failed to create sequence: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def put(self, request):
+        """Update an existing column sequence"""
+        try:
+            table_name = request.data.get('table_name')
+            sequence = request.data.get('sequence')
+            seq_name = request.data.get('seq_name')
+            old_seq_name = request.data.get('old_seq_name')  # For renaming
+            scope = request.data.get('scope', 'L')
+            user = request.user
+            customer = user.cust_id
+            
+            if not customer:
+                return Response(
+                    {"error": "User is not associated with any customer."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not table_name or not sequence or not seq_name:
+                return Response(
+                    {"error": "table_name, sequence, and seq_name are required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            customer_connection = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                database=customer.cust_db,
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD']
+            )
+            customer_connection.autocommit = True
+            
+            with customer_connection.cursor() as cursor:
+                # Use old_seq_name if provided (for renaming), otherwise use seq_name
+                update_seq_name = old_seq_name if old_seq_name else seq_name
+                
+                # Check if user owns this sequence or if it's a global sequence
+                check_sql = """
+                    SELECT username, scope FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s AND seq_name = %s
+                """
+                cursor.execute(check_sql, (table_name, update_seq_name))
+                result = cursor.fetchone()
+                
+                if not result:
+                    customer_connection.close()
+                    return Response(
+                        {"error": f"Sequence '{update_seq_name}' not found."},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                
+                # Allow editing if user owns the sequence OR if it's a global sequence
+                if result[0] != user.email and result[1] != 'G':
+                    customer_connection.close()
+                    return Response(
+                        {"error": "You don't have permission to edit this sequence."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                
+                # If renaming, check if new name already exists
+                if old_seq_name and old_seq_name != seq_name:
+                    cursor.execute(check_sql, (table_name, seq_name))
+                    if cursor.fetchone():
+                        customer_connection.close()
+                        return Response(
+                            {"error": f"Sequence name '{seq_name}' already exists."},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
+                # Update sequence (keep original username if updating global sequence)
+                update_sql = """
+                    UPDATE "GENERAL"."tbl_col_seq"
+                    SET sequence = %s, seq_name = %s, scope = %s
+                    WHERE table_name = %s AND seq_name = %s
+                """
+                cursor.execute(update_sql, (sequence, seq_name, scope, table_name, update_seq_name))
+            
+            customer_connection.close()
+            return Response({"message": f"Sequence '{seq_name}' updated successfully"})
+        except Exception as e:
+            return Response({
+                "error": f"Failed to update sequence: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def delete(self, request):
+        """Delete a column sequence"""
+        try:
+            table_name = request.data.get('table_name')
+            seq_name = request.data.get('seq_name')
+            user = request.user
+            customer = user.cust_id
+            
+            if not customer:
+                return Response(
+                    {"error": "User is not associated with any customer."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not table_name or not seq_name:
+                return Response(
+                    {"error": "table_name and seq_name are required."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            customer_connection = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                database=customer.cust_db,
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD']
+            )
+            customer_connection.autocommit = True
+            
+            with customer_connection.cursor() as cursor:
+                # Check if user owns this sequence or if it's a global sequence
+                check_sql = """
+                    SELECT username, scope FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s AND seq_name = %s
+                """
+                cursor.execute(check_sql, (table_name, seq_name))
+                result = cursor.fetchone()
+                
+                if not result:
+                    customer_connection.close()
+                    return Response(
+                        {"error": f"Sequence '{seq_name}' not found."},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                
+                # Allow deleting if user owns the sequence OR if it's a global sequence
+                if result[0] != user.email and result[1] != 'G':
+                    customer_connection.close()
+                    return Response(
+                        {"error": "You don't have permission to delete this sequence."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                
+                # Delete sequence
+                delete_sql = """
+                    DELETE FROM "GENERAL"."tbl_col_seq"
+                    WHERE table_name = %s AND seq_name = %s
+                """
+                cursor.execute(delete_sql, (table_name, seq_name))
+            
+            customer_connection.close()
+            return Response({"message": f"Sequence '{seq_name}' deleted successfully"})
+        except Exception as e:
+            return Response({
+                "error": f"Failed to delete sequence: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ValidationRulesView(APIView):
+    # authentication_classes = [JWTCookieAuthentication]
+    # permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            validation_rules = ValidationRules.objects.all().order_by('id')
+            serializer = ValidationRulesSerializer(validation_rules, many=True)
+            return Response({"validation_rules": serializer.data})
+        except Exception as e:
+            return Response({
+                "error": f"error: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def post(self, request):
+        try:
+            selected_ids = request.data.get('selected_ids', [])
+            
+            if not selected_ids:
+                return Response({
+                    "error": "No rules selected"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get selected rules from database
+            selected_rules = ValidationRules.objects.filter(id__in=selected_ids).order_by('id')
+            
+            # Build regex by combining expressions
+            regex_parts = ['^']
+            
+            for rule in selected_rules:
+                if rule.expression:
+                    regex_parts.append(rule.expression)
+            
+            # Add character class and end
+            regex_parts.append('.+$')
+            
+            # Combine all parts
+            final_regex = ''.join(regex_parts)
+            
+            # Print to terminal
+            print("\n" + "="*80)
+            print("GENERATED REGULAR EXPRESSION")
+            print("="*80)
+            print(f"Regex: {final_regex}")
+            print("\nSelected Validation Rules:")
+            for rule in selected_rules:
+                print(f"  - {rule.question}: {rule.expression}")
+            print("="*80 + "\n")
+            
+            return Response({"regex": final_regex})
+            
+        except Exception as e:
+            print(f"Error generating regex: {str(e)}")
+            return Response({
+                "error": f"Failed to generate regex: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+

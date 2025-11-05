@@ -176,10 +176,14 @@ POST http://localhost:8000/api/api-column-statistics/
 Content-Type: application/json
 
 {
-    "column_name": "currency_code",
-    "table_name": "testing_abc__",
+    "column_name": "mat",
+    "table_name": "measurement__",
     "schema": "GENERAL",
     "user": "hancelxavier@gmail.com"
 }
+
+
+### Test Validation Rules API
+GET http://localhost:8000/api/api-validation-rules/
 
 

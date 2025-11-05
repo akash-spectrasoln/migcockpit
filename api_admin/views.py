@@ -30,6 +30,9 @@ class CreateCustomerView(APIView):
     
     def post(self, request):
         """Create a new customer and associated user in a single transaction."""
+        database_created = False
+        database_name = None
+        
         try:
             # Extract customer and user data from request
             customer_data = request.data.get('customer', {})
@@ -41,13 +44,15 @@ class CreateCustomerView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Use transaction.atomic to ensure both customer and user are created together
+            # Use transaction.atomic to ensure customer and user are created together
+            # Note: Database creation happens outside this transaction due to PostgreSQL requirements
             with transaction.atomic():
                 # Create customer
                 customer_serializer = CustomerSerializer(data=customer_data)
                 customer_serializer.is_valid(raise_exception=True)
                 customer_serializer.validated_data['created_by'] = request.user.email
                 customer = customer_serializer.save()
+                database_name = customer.cust_db  # Store for potential cleanup
                 
                 # Create user with the newly created customer
                 user_data['cust_id'] = customer.id
@@ -58,18 +63,70 @@ class CreateCustomerView(APIView):
                 user_serializer.validated_data['is_staff'] = True # Set is_staff to True for the company's admin
                 user = user_serializer.save()
                 
+                # Create customer database and schemas
+                # Note: This uses autocommit and cannot be rolled back by Django
+                # If it fails, we'll catch it and let Django rollback customer/user
+                try:
+                    customer.create_customer_database()
+                    database_created = True
+                except Exception as db_error:
+                    # Database creation failed, Django will rollback customer/user automatically
+                    raise Exception(f"Failed to create customer database: {str(db_error)}")
+                
+                # If we reach here, everything succeeded
                 return Response(
                     {
-                        "message": "Customer and user created successfully",
+                        "message": "Customer, user, and database created successfully",
                     }, 
                     status=status.HTTP_201_CREATED
                 )
                 
         except Exception as e:
+            # If database was created but transaction failed, clean it up manually
+            if database_created and database_name:
+                try:
+                    self._cleanup_database(database_name)
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to cleanup database {database_name}: {str(cleanup_error)}")
+            
             return Response(
                 {"error": f"Error creating customer and user: {str(e)}"}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    def _cleanup_database(self, database_name):
+        """Helper method to cleanup a database if transaction fails."""
+        import psycopg2
+        from django.conf import settings
+        
+        try:
+            conn = psycopg2.connect(
+                host=settings.DATABASES['default']['HOST'],
+                port=settings.DATABASES['default']['PORT'],
+                user=settings.DATABASES['default']['USER'],
+                password=settings.DATABASES['default']['PASSWORD'],
+                database='postgres'
+            )
+            conn.autocommit = True
+            cursor = conn.cursor()
+            
+            # Terminate any connections to the database before dropping
+            cursor.execute(f"""
+                SELECT pg_terminate_backend(pg_stat_activity.pid)
+                FROM pg_stat_activity
+                WHERE pg_stat_activity.datname = %s
+                AND pid <> pg_backend_pid();
+            """, (database_name,))
+            
+            # Drop the database
+            cursor.execute(f'DROP DATABASE IF EXISTS "{database_name}";')
+            print(f"Cleaned up database: {database_name}")
+            
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            print(f"Error cleaning up database {database_name}: {str(e)}")
+            raise
 
 class CountryListView(APIView):
     """API view for listing countries."""
@@ -447,7 +504,6 @@ class CustomerUserUpdateView(APIView):
             customer_data = request.data.get('customer', {})
             user_data = request.data.get('user', {})
 
-            print(user_id,"]]]]]]]]]]]]]]]]]]]]]]]]]]]]")
             
             if not id:
                 return Response(

@@ -91,7 +91,7 @@ class User(AbstractUser):
         ('tsv', 'TSV')
     ]
     file_format = models.CharField(max_length=10, choices=download_format_choice, default='csv')
-
+    date_format = models.CharField(max_length=10, default='MM-DD-YYYY')
     objects = UserManager()  # Use custom manager for email-based authentication
 
     USERNAME_FIELD = 'email' # Set email as the field used for authentication
@@ -194,7 +194,7 @@ class Customer(models.Model):
         return self.name
     
     def save(self, *args, **kwargs):
-        """Override save method to handle database creation and ID generation."""
+        """Override save method to handle ID generation."""
         # If this is a new customer (no cust_id yet)
         if not self.cust_id:
             # Generate cust_id in the format C00001, C00002, etc.
@@ -205,13 +205,6 @@ class Customer(models.Model):
         
         # Call the parent save method
         super().save(*args, **kwargs)
-        
-        # After saving, create the customer database if it's a new customer
-        # Use a separate connection to avoid transaction conflicts
-        if not hasattr(self, '_database_created'):
-            from django.db import transaction
-            transaction.on_commit(lambda: self.create_customer_database())
-            self._database_created = True
     
     def get_next_customer_id(self):
         """Get the next available customer ID."""
@@ -249,6 +242,10 @@ class Customer(models.Model):
         import psycopg2
         from django.conf import settings
         
+        database_created = False
+        conn = None
+        cursor = None
+        
         try:
             # Connect to PostgreSQL server using the 'postgres' database to create new databases
             # Use a completely separate connection to avoid transaction conflicts
@@ -274,21 +271,35 @@ class Customer(models.Model):
                 # Create the database
                 cursor.execute(f'CREATE DATABASE "{self.cust_db}";')
                 print(f"Created database: {self.cust_db}")
+                database_created = True
                 
-                # Create schemas in the new database
-                self.create_customer_schemas()
-            
-            cursor.close()
-            conn.close()
+                try:
+                    # Create schemas in the new database
+                    self.create_customer_schemas()
+                except Exception as schema_error:
+                    # If schema creation fails, drop the database to maintain consistency
+                    print(f"Schema creation failed, rolling back database creation for {self.cust_db}")
+                    cursor.execute(f'DROP DATABASE IF EXISTS "{self.cust_db}";')
+                    raise schema_error
             
         except Exception as e:
             print(f"Error creating database {self.cust_db}: {str(e)}")
             raise Exception(f"Failed to create customer database: {str(e)}")
+        
+        finally:
+            # Ensure connections are always closed
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     def create_customer_schemas(self):
         """Create schemas in the customer's database."""
         import psycopg2
         from django.conf import settings
+        
+        conn = None
+        cursor = None
         
         try:
             # Connect to the customer's new database
@@ -331,15 +342,31 @@ class Customer(models.Model):
             );
             '''
             cursor.execute(destination_table_sql)
+
+            sequence_table_sql = f'''
+            CREATE TABLE IF NOT EXISTS "{main_schema}".tbl_col_seq (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(100),
+                table_name VARCHAR(100),
+                sequence VARCHAR(400),
+                seq_name VARCHAR(100),
+                scope VARCHAR(10) CHECK (scope IN ('G', 'L'))
+            );
+            '''
+            cursor.execute(sequence_table_sql)
             
-            cursor.close()
-            conn.close()
-            
-            print(f"Created schemas in database {self.cust_db}: {main_schema}")
+            print(f"Created schemas and tables in database {self.cust_db}: {main_schema}")
             
         except Exception as e:
             print(f"Error creating schemas in database {self.cust_db}: {str(e)}")
             raise Exception(f"Failed to create schemas in customer database: {str(e)}")
+        
+        finally:
+            # Ensure connections are always closed
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
     
     class Meta:
         db_table = 'customer'
@@ -350,6 +377,17 @@ class ObjectMap(models.Model):
     object_nme = models.CharField(max_length=100)
     tname = models.CharField(max_length=100) 
 
+    class Meta:
+        db_table = 'objectmap'
+
+
+class ValidationRules(models.Model):
+    question = models.CharField(max_length=200)
+    expression = models.CharField(max_length=200)
+    category = models.CharField(max_length=100,null=True)
+
+    class Meta:
+        db_table = 'validationrules'
 
 
     

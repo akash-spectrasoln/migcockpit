@@ -2,14 +2,16 @@ from django.urls import path
 from .views import (
     ProjectsListView, SqlConnectionView, SourcesListView, SourceFieldsView,
     CountryListView, SourceConnectionCreateView, CustomerSourcesView, SourceEditView, SourceDeleteView, DestinationConnectionCreateView, CustomerDestinationsView, DestinationEditView, DestinationDeleteView, FileUploadPreviewView, WriteTableToDatabaseView, ListUploadedTablesView, GetTableDataView, GetDistinctValuesView, PreviewTableDataView, UploadTableDataView,
-     CreateTableRecordView, EditTableRecordView, DeleteTableRecordView, UpdateTableStructureView, DeleteTableView, CreateTableWithoutRecordsView, ImportDataFromHanaView, DownloadTableDataView, LoginView, LogoutView,
-     TruncateTableView, CreateUserView, UserListView, UserUpdateView, UserDeleteView, UserPasswordResetView, UserPasswordResetConfirmView, ProjectsListView, ColumnStatisticsView
+     CreateTableRecordView, EditTableRecordView, DeleteTableRecordView, UpdateTableStructureView, DeleteTableView, CreateTableWithoutRecordsView, ImportDataFromHanaView, DownloadTableDataView, LoginView, LogoutView, RefreshTokenView,
+     TruncateTableView, CreateUserView, UserListView, UserUpdateView, UserDeleteView, UserPasswordResetView, UserPasswordResetConfirmView, ProjectsListView, ColumnStatisticsView, ColumnSequenceListView, ColumnSequenceView,
+     ValidationRulesView, 
 )
 
 urlpatterns = [
     # Authentication API endpoints
     path('api-login/', LoginView.as_view(), name='login-api'),
     path('api-logout/', LogoutView.as_view(), name='logout-api'),
+    path('api-refresh/', RefreshTokenView.as_view(), name='refresh-api'),
     
     path('fetch/', SqlConnectionView.as_view()),
     path('sources/', SourcesListView.as_view()),
@@ -80,6 +82,11 @@ urlpatterns = [
     path('api-reset-password-confirm/', UserPasswordResetConfirmView.as_view(), name='reset-password-confirm-api'),
     path('api-projects-list/', ProjectsListView.as_view(), name='projects-list-api'),
     path('api-column-statistics/', ColumnStatisticsView.as_view(), name='api-column-statistics'),
+    
+    # Column sequence API endpoints
+    path('api-column-sequence-list/', ColumnSequenceListView.as_view(), name='column-sequence-list-api'),
+    path('api-column-sequence/', ColumnSequenceView.as_view(), name='column-sequence-api'),
+    path('api-validation-rules/', ValidationRulesView.as_view(), name='validation-rules-api'),
 ]
 
 
@@ -87,11 +94,11 @@ from .frondendviews import ( login_page, sql_connection_form, source_connection_
 customer_sources, edit_source, destination_connection_form, customer_destinations,
 edit_destination, file_upload, table_management, user_tables, table_data_display, create_table, 
 import_data, table_navigation, customer_user_dashboard, users_list, create_user, edit_user, user_delete,
-password_reset_request, password_reset_confirm, projects_list)
+password_reset_request, password_reset_confirm, projects_list, validation_rules_page)
 
 frontend_urlpatterns = [
     path('login/', login_page, name='login_page'),
-    path('', sql_connection_form, name='sql_connection_form'),
+    path('fetchsql', sql_connection_form, name='sql_connection_form'),
     path('add-source/', source_connection_form, name='source_connection_form'),
     path('add-destination/', destination_connection_form, name='destination_connection_form'),
     path('customer/sources/', customer_sources, name='customer_sources'),
@@ -113,6 +120,7 @@ frontend_urlpatterns = [
     path('projects-list/', projects_list, name='projects_list'),
     path('reset-password/', password_reset_request, name='reset-password-page'),
     path('reset-password-confirm/<str:uidb64>/<str:token>/', password_reset_confirm, name='reset-password-confirm-page'),
+    path('validation-rules/', validation_rules_page, name='validation_rules_page'),
 ]
 
 

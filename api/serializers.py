@@ -1,12 +1,12 @@
 from rest_framework import serializers
-from .models import SourceDB, SourceForm, Customer, Country, User
+from .models import SourceDB, SourceForm, Customer, Country, User , ValidationRules
 
 class SqlConnectionSerializer(serializers.Serializer):
     sql_hostname = serializers.CharField(required=True)
     sql_database = serializers.CharField(required=True)
     sql_username = serializers.CharField(required=True)
     sql_password = serializers.CharField(required=True)
-    sql_port = serializers.IntegerField(required=True)
+    
     
 
 class SourceDbSerializer(serializers.ModelSerializer):
@@ -21,6 +21,11 @@ class SourceFormSerializer(serializers.ModelSerializer):
     class Meta:
         model = SourceForm
         fields = ['id', 'src_db', 'attribute_name', 'input_type', 'label_name', 'is_required']
+
+class ValidationRulesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ValidationRules
+        fields = ['id', 'question', 'expression','category']
 
 
 class CountrySerializer(serializers.ModelSerializer):

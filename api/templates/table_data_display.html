@@ -56,11 +56,34 @@
             top: 0;
             z-index: 10;
             font-size: 0.85em;
-            padding: 0.5rem;
+            padding: 0.25rem 0.5rem;
         }
         .sortable-header:hover {
             background-color: #495057 !important;
             cursor: pointer;
+        }
+        
+        .sort-arrow {
+            transition: all 0.2s ease;
+            background-color: rgba(0, 0, 0, 0.1);
+            border-radius: 2px;
+        }
+        
+        .sort-arrow:hover {
+            opacity: 1 !important;
+            color: #007bff !important;
+            transform: scale(1.1);
+            background-color: rgba(0, 123, 255, 0.2);
+        }
+        
+        .sort-arrow-up:hover {
+            color: #28a745 !important;
+            background-color: rgba(40, 167, 69, 0.2);
+        }
+        
+        .sort-arrow-down:hover {
+            color: #dc3545 !important;
+            background-color: rgba(220, 53, 69, 0.2);
         }
         .sort-icon {
             transition: opacity 0.2s ease;
@@ -521,6 +544,87 @@
             color: #495057;
         }
         
+        /* Sorting controls for statistics */
+        .sorting-controls {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 6px;
+            align-items: center;
+        }
+        
+        .sorting-controls .btn {
+            font-size: 0.6rem;
+            padding: 0.15rem 0.3rem;
+            border-radius: 2px;
+            min-width: 24px;
+            height: 20px;
+        }
+        
+        .sorting-controls .btn.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        
+        .sorting-controls .btn:not(.active) {
+            background-color: #f8f9fa;
+            color: #6c757d;
+            border-color: #dee2e6;
+        }
+        
+        .sorting-controls .btn:not(.active):hover {
+            background-color: #e9ecef;
+            color: #495057;
+        }
+        
+        /* Error highlighting styles */
+        .distinct-value-row.error-highlighted {
+            background-color: #f8d7da !important;
+            color: #721c24 !important;
+            border-left: 3px solid #dc3545;
+        }
+        
+        .distinct-value-row.error-highlighted .value-cell,
+        .distinct-value-row.error-highlighted .count-cell {
+            color: #721c24 !important;
+            font-weight: 600;
+        }
+        
+        .sorting-controls .error-sort-btn {
+            background-color: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+        
+        .sorting-controls .error-sort-btn:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
+        }
+        
+        /* Saved Sequences Styles */
+        .sequence-badge {
+            display: inline-block;
+            padding: 0.4rem 0.6rem;
+            margin: 0.2rem;
+            background-color: #007bff;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+        
+        .sequence-badge:hover {
+            background-color: #0056b3;
+            transform: scale(1.05);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .sequence-badge:active {
+            transform: scale(0.98);
+        }
+        
     </style>
 {% endblock %}
 
@@ -847,6 +951,32 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                    <!-- Saved Sequences Section -->
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-2" id="toggleSavedSequencesBtn" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">
+                                <i class="fas fa-bookmark"></i> Saved Sequences
+                                <i class="fas fa-chevron-down" id="sequencesChevron"></i>
+                            </button>
+                            <div id="savedSequencesContainer" style="display: none;">
+                                <div class="card" style="border: 1px solid #dee2e6;">
+                                    <div class="card-body" style="padding: 0;">
+                                        <div style="max-height: 200px; overflow-y: auto;">
+                                            <table class="table table-sm table-hover mb-0" id="savedSequencesTable" style="font-size: 0.95rem;">
+                                                <tbody id="savedSequencesList">
+                                                    <!-- Saved sequences will be populated here -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div id="noSequencesMessage" style="display: none; text-align: center; color: #6c757d; font-size: 0.9rem; padding: 1.5rem;">
+                                            <i class="fas fa-info-circle"></i> No saved sequences available
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="row">
                         <!-- Left Column: Available Columns -->
                         <div class="col-md-6">
@@ -856,7 +986,7 @@
                                     <i class="fas fa-angle-double-right"></i> Add All
                                 </button>
                             </div>
-                            <div id="availableColumnsList" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #f8f9fa;">
+                            <div id="availableColumnsList" style="max-height: 320px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #f8f9fa;">
                                 <!-- Available columns will be populated here -->
                             </div>
                         </div>
@@ -869,7 +999,7 @@
                                     <i class="fas fa-angle-double-left"></i> Remove All
                                 </button>
                             </div>
-                            <div id="selectedColumnsList" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #e3f2fd;">
+                            <div id="selectedColumnsList" style="max-height: 320px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #e3f2fd;">
                                 <!-- Selected columns will be populated here -->
                             </div>
                         </div>
@@ -877,11 +1007,137 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-info" id="saveSequenceBtn">
+                        <i class="fas fa-save"></i> Save as Sequence
+                    </button>
                     <button type="button" class="btn btn-success" id="resetColumnsBtn">
                         <i class="fas fa-undo"></i> Reset to Default
                     </button>
                     <button type="button" class="btn btn-primary" id="applyColumnsBtn">
                         <i class="fas fa-check"></i> Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Sequence Modal (Simple) -->
+    <div class="modal fade" id="saveSequenceModal" tabindex="-1" aria-labelledby="saveSequenceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="saveSequenceModalLabel">Save Column Sequence</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="sequenceName" class="form-label">Sequence Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="sequenceName" placeholder="Enter sequence name" required>
+                        <div class="form-text">Enter a unique name for this column sequence</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="sequenceScope" class="form-label">Scope <span class="text-danger">*</span></label>
+                        <select class="form-select" id="sequenceScope" required>
+                            <option value="L" selected>Local (Only you can see this sequence)</option>
+                            <option value="G">Global (All users in your organization can see this sequence)</option>
+                        </select>
+                        <div class="form-text">Choose who can access this sequence</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Selected Columns Preview</label>
+                        <div id="sequencePreview" style="max-height: 150px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #f8f9fa; font-size: 0.85rem;">
+                            <!-- Preview will be populated here -->
+                        </div>
+                    </div>
+                    <input type="hidden" id="editingSequenceName" value="">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmSaveSequenceBtn">
+                        <i class="fas fa-save"></i> Save Sequence
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Sequence Modal (Full Column Selector) -->
+    <div class="modal fade" id="editSequenceModal" tabindex="-1" aria-labelledby="editSequenceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editSequenceModalLabel">Edit Column Sequence: <span id="editSequenceNameDisplay"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Scope Selector -->
+                    <div class="row mb-3">
+                        <div class="col-12">
+                            <label for="editSequenceScope" class="form-label">Scope <span class="text-danger">*</span></label>
+                            <select class="form-select" id="editSequenceScope" required>
+                                <option value="L">Local (Only you can see this sequence)</option>
+                                <option value="G">Global (All users in your organization can see this sequence)</option>
+                            </select>
+                            <div class="form-text">Choose who can access this sequence</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <!-- Left Column: Available Columns -->
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" style="font-size: 0.85rem;">Available Columns</h6>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="editAddAllColumnsBtn" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">
+                                    <i class="fas fa-angle-double-right"></i> Add All
+                                </button>
+                            </div>
+                            <div id="editAvailableColumnsList" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #f8f9fa;">
+                                <!-- Available columns will be populated here -->
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column: Selected Columns (Ordered) -->
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="mb-0" style="font-size: 0.85rem;">Selected Columns (drag to reorder)</h6>
+                                <button type="button" class="btn btn-sm btn-outline-danger" id="editRemoveAllColumnsBtn" style="font-size: 0.7rem; padding: 0.15rem 0.4rem;">
+                                    <i class="fas fa-angle-double-left"></i> Remove All
+                                </button>
+                            </div>
+                            <div id="editSelectedColumnsList" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; padding: 0.5rem; border-radius: 4px; background-color: #e3f2fd;">
+                                <!-- Selected columns will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="updateSequenceBtn">
+                        <i class="fas fa-save"></i> Update Sequence
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Sequence Confirmation Modal -->
+    <div class="modal fade" id="deleteSequenceModal" tabindex="-1" aria-labelledby="deleteSequenceModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="deleteSequenceModalLabel">Delete Sequence</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>Warning:</strong> This action cannot be undone.
+                    </div>
+                    <p>Are you sure you want to delete the sequence "<strong id="deleteSequenceName"></strong>"?</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteSequenceBtn">
+                        <i class="fas fa-trash"></i> Delete Sequence
                     </button>
                 </div>
             </div>
@@ -1013,9 +1269,16 @@
         let selectedColumns = [];
         let draggedElement = null;
         
+        // Edit sequence modal variables
+        let editModalSelectedColumns = [];
+        let editModalDraggedElement = null;
+        let editingSequenceName = '';
+        
         // Column statistics variables
         let currentColumnForStats = null;
         let currentColumnStats = null;
+        // Persisted column selection for downloads (updated on Apply)
+        let selectedColumnsForDownload = [];
 
         // Wait for DOM to be fully loaded
         document.addEventListener('DOMContentLoaded', function() {
@@ -1050,6 +1313,15 @@
             document.getElementById('resetColumnsBtn').addEventListener('click', resetColumns);
             document.getElementById('addAllColumnsBtn').addEventListener('click', addAllColumns);
             document.getElementById('removeAllColumnsBtn').addEventListener('click', removeAllColumns);
+            document.getElementById('saveSequenceBtn').addEventListener('click', showSaveSequenceModal);
+            document.getElementById('confirmSaveSequenceBtn').addEventListener('click', confirmSaveSequence);
+            document.getElementById('confirmDeleteSequenceBtn').addEventListener('click', confirmDeleteSequence);
+            document.getElementById('toggleSavedSequencesBtn').addEventListener('click', toggleSavedSequences);
+            
+            // Edit sequence modal event listeners
+            document.getElementById('editAddAllColumnsBtn').addEventListener('click', editAddAllColumns);
+            document.getElementById('editRemoveAllColumnsBtn').addEventListener('click', editRemoveAllColumns);
+            document.getElementById('updateSequenceBtn').addEventListener('click', confirmUpdateSequence);
             
             // Download button - direct download with preferred format
             document.getElementById('downloadDataBtn').addEventListener('click', function(e) {
@@ -1241,6 +1513,11 @@
 
             const csrfToken = getCookie('csrftoken');
 
+            // Use the last applied column selection for downloads
+            const selectedColumnNames = selectedColumnsForDownload.length > 0
+                ? selectedColumnsForDownload
+                : null;
+
             fetch('{% url "download-table-data-api" %}', {
                 method: 'POST',
                 headers: {
@@ -1253,7 +1530,8 @@
                     filters: currentFilters,
                     sort_column: currentSortColumn,
                     sort_direction: currentSortDirection,
-                    format: format
+                    format: format,
+                    selected_columns: selectedColumnNames
                 })
             })
             .then(response => {
@@ -1970,13 +2248,13 @@
                 const th = document.createElement('th');
                 th.style.whiteSpace = 'nowrap';
                 th.style.fontSize = '0.85em';
-                th.style.padding = '0.5rem';
+                th.style.padding = '0.15rem 0.5rem';
                 th.style.cursor = 'pointer';
                 th.style.userSelect = 'none';
                 th.className = 'sortable-header';
-                th.title = 'Click to sort ascending | Double-click or right-click for statistics';
+                th.title = 'Use arrows to sort | Double-click or right-click for statistics';
                 
-                // Create header content with sort indicator
+                // Create header content with sort arrows
                 const headerContent = document.createElement('div');
                 headerContent.style.display = 'flex';
                 headerContent.style.alignItems = 'center';
@@ -1985,26 +2263,75 @@
                 const columnName = document.createElement('span');
                 columnName.textContent = column.name;
                 
-                const sortIcon = document.createElement('i');
-                sortIcon.className = 'fas fa-sort sort-icon';
-                sortIcon.style.marginLeft = '5px';
-                sortIcon.style.opacity = '0.5';
+                // Create sort arrows container
+                const sortArrows = document.createElement('div');
+                sortArrows.style.display = 'flex';
+                sortArrows.style.flexDirection = 'column';
+                sortArrows.style.marginLeft = '5px';
+                sortArrows.style.gap = '1px';
                 
-                // Update sort icon based on current sort state
+                // Create up arrow
+                const upArrow = document.createElement('span');
+                upArrow.innerHTML = '▲';
+                upArrow.className = 'sort-arrow sort-arrow-up';
+                upArrow.style.fontSize = '0.8em';
+                upArrow.style.opacity = '0.7';
+                upArrow.style.cursor = 'pointer';
+                upArrow.style.padding = '2px';
+                upArrow.style.borderRadius = '2px';
+                upArrow.style.display = 'inline-block';
+                upArrow.style.textAlign = 'center';
+                upArrow.style.minWidth = '12px';
+                upArrow.title = 'Sort ascending';
+                
+                // Create down arrow
+                const downArrow = document.createElement('span');
+                downArrow.innerHTML = '▼';
+                downArrow.className = 'sort-arrow sort-arrow-down';
+                downArrow.style.fontSize = '0.8em';
+                downArrow.style.opacity = '0.7';
+                downArrow.style.cursor = 'pointer';
+                downArrow.style.padding = '2px';
+                downArrow.style.borderRadius = '2px';
+                downArrow.style.display = 'inline-block';
+                downArrow.style.textAlign = 'center';
+                downArrow.style.minWidth = '12px';
+                downArrow.title = 'Sort descending';
+                
+                // Update arrow states based on current sort
                 if (currentSortColumn === column.name) {
-                    sortIcon.className = currentSortDirection === 'asc' ? 'fas fa-sort-up sort-icon' : 'fas fa-sort-down sort-icon';
-                    sortIcon.style.opacity = '1';
+                    if (currentSortDirection === 'asc') {
+                        upArrow.style.opacity = '1';
+                        upArrow.style.color = '#007bff';
+                    } else {
+                        downArrow.style.opacity = '1';
+                        downArrow.style.color = '#007bff';
+                    }
                     th.style.backgroundColor = '#e3f2fd';
                 }
                 
+                sortArrows.appendChild(upArrow);
+                sortArrows.appendChild(downArrow);
+                
                 headerContent.appendChild(columnName);
-                headerContent.appendChild(sortIcon);
+                headerContent.appendChild(sortArrows);
                 th.appendChild(headerContent);
                 
-                // Add single click handler for sorting
-                th.addEventListener('click', (event) => {
+                console.log('Created arrows for column:', column.name, upArrow, downArrow);
+                
+                // Add click handlers for sorting arrows
+                upArrow.addEventListener('click', (event) => {
                     event.preventDefault();
-                    sortByColumn(column.name);
+                    event.stopPropagation();
+                    console.log('Up arrow clicked for column:', column.name);
+                    sortByColumn(column.name, 'asc');
+                });
+                
+                downArrow.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    console.log('Down arrow clicked for column:', column.name);
+                    sortByColumn(column.name, 'desc');
                 });
                 
                 // Add double click handler for showing column statistics popup
@@ -2310,7 +2637,8 @@
                 const totalCount = stats.total_count || 0;
                 const nullCount = stats.null_count || 0;
                 const nonNullCount = totalCount - nullCount;
-                const distinctValues = stats.distinct_values || [];
+                const minDate = stats.min_date || 'N/A';
+                const maxDate = stats.max_date || 'N/A';
                 const invalidDateCount = stats.invalid_date_count || 0;
                 const invalidDates = stats.invalid_dates || [];
                 
@@ -2325,8 +2653,12 @@
                         <span class="stat-value">${nonNullCount}</span>
                     </div>
                     <div class="stat-line">
-                        <span class="stat-label">Distinct values</span>
-                        <span class="stat-value">${distinctValues.length}</span>
+                        <span class="stat-label">Earliest date</span>
+                        <span class="stat-value">${minDate}</span>
+                    </div>
+                    <div class="stat-line">
+                        <span class="stat-label">Latest date</span>
+                        <span class="stat-value">${maxDate}</span>
                     </div>
                     <div class="stat-line clickable-stat" data-filter-type="invalid-dates" data-column="${columnName}">
                         <span class="stat-label">Invalid dates</span>
@@ -2334,44 +2666,26 @@
                     </div>
                 `;
                 
-                // Add distinct values table
-                if (distinctValues.length > 0) {
-                    statsHtml += `
-                        <div class="distinct-values-section">
-                            <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Date Distribution:</div>
-                            <div class="distinct-values-table">
-                    `;
-                    
-                    // Show all distinct values
-                    distinctValues.forEach(item => {
-                        const value = item.value || 'NULL';
-                        const count = item.count || 0;
-                        statsHtml += `
-                            <div class="distinct-value-row clickable-distinct" data-filter-type="value" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}">
-                                <div class="value-cell" title="${value}">${value}</div>
-                                <div class="count-cell">${count}</div>
-                            </div>
-                        `;
-                    });
-                    
-                    statsHtml += `
-                            </div>
-                        </div>
-                    `;
-                }
-                
                 // Add invalid dates section if there are any
                 if (invalidDates.length > 0) {
                     statsHtml += `
                         <div class="distinct-values-section">
                             <div class="stat-label" style="margin-bottom: 5px; font-weight: 600; color: #dc3545;">Invalid Dates:</div>
-                            <div class="distinct-values-table" style="border-color: #dc3545; background-color: #f8d7da;">
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="distinct-values-table" id="invalidDatesTable" style="border-color: #dc3545; background-color: #f8d7da;">
                     `;
                     
                     // Show invalid dates
                     invalidDates.forEach(date => {
                         statsHtml += `
-                            <div class="distinct-value-row clickable-distinct" data-filter-type="invalid-date" data-column="${columnName}" data-value="${date.replace(/'/g, "\\'")}" style="color: #dc3545;">
+                            <div class="distinct-value-row clickable-distinct error-highlighted" data-filter-type="invalid-date" data-column="${columnName}" data-value="${date.replace(/'/g, "\\'")}">
                                 <div class="value-cell" title="${date}">${date}</div>
                                 <div class="count-cell">1</div>
                             </div>
@@ -2404,12 +2718,24 @@
                 
                 // Add distinct countries table with headers
                 if (distinctCountries.length > 0) {
+                    const hasErrors = distinctCountries.some(item => invalidCountryCodes.includes(item.value.toUpperCase()));
                     statsHtml += `
                         <div class="distinct-values-section">
                             <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Country Distribution:</div>
-                            <div class="distinct-values-table">
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                ${hasErrors ? `<button class="btn btn-sm sort-btn error-sort-btn" data-sort="errors-first" title="Sort errors first">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>` : ''}
+                            </div>
+                            <div class="distinct-values-table" id="distinctCountriesTable">
                                 <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
-                                    <div class="value-cell">Country</div>
+                                    <div class="value-cell">${columnName}</div>
                                     <div class="count-cell">Count</div>
                                 </div>
                     `;
@@ -2419,11 +2745,11 @@
                         const value = item.value || 'NULL';
                         const count = item.count || 0;
                         const isInvalid = invalidCountryCodes.includes(value.toUpperCase());
-                        const rowStyle = isInvalid ? 'color: #dc3545; background-color: #f8d7da;' : '';
+                        const rowClass = isInvalid ? 'error-highlighted' : '';
                         const filterType = isInvalid ? 'invalid-country-code' : 'value';
                         
                         statsHtml += `
-                            <div class="distinct-value-row clickable-distinct" data-filter-type="${filterType}" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}" style="${rowStyle}">
+                            <div class="distinct-value-row clickable-distinct ${rowClass}" data-filter-type="${filterType}" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}">
                                 <div class="value-cell" title="${value}">${value}</div>
                                 <div class="count-cell">${count}</div>
                             </div>
@@ -2436,15 +2762,13 @@
                     `;
                 }
             } else if (columnCategory === 'currency_code') {
-                // Calculate null rows, invalid currency codes, and currency mismatches
+                // Calculate null rows and invalid currency codes
                 const nullCount = stats.null_count || 0;
                 const invalidCurrencyCodeCount = stats.invalid_currency_code_count || 0;
                 const invalidCurrencyCodes = stats.invalid_currency_codes || [];
-                const mismatchedCurrencyCodeCount = stats.mismatched_currency_code_count || 0;
-                const mismatchedCurrencyCodes = stats.mismatched_currency_codes || [];
                 const distinctCurrencies = stats.distinct_currencies || [];
                 
-                // Add basic statistics - null rows, invalid currency codes, and currency mismatches
+                // Add basic statistics - null rows and invalid currency codes
                 statsHtml += `
                     <div class="stat-line clickable-stat" data-filter-type="null" data-column="${columnName}">
                         <span class="stat-label">Null rows</span>
@@ -2454,20 +2778,28 @@
                         <span class="stat-label">Invalid currency codes</span>
                         <span class="stat-value">${invalidCurrencyCodeCount}</span>
                     </div>
-                    <div class="stat-line clickable-stat" data-filter-type="currency-mismatches" data-column="${columnName}">
-                        <span class="stat-label">Currency mismatches</span>
-                        <span class="stat-value">${mismatchedCurrencyCodeCount}</span>
-                    </div>
                 `;
                 
                 // Add distinct currencies table with headers
                 if (distinctCurrencies.length > 0) {
+                    const hasErrors = distinctCurrencies.some(item => invalidCurrencyCodes.includes(item.value.toUpperCase()));
                     statsHtml += `
                         <div class="distinct-values-section">
                             <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Currency Distribution:</div>
-                            <div class="distinct-values-table">
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                ${hasErrors ? `<button class="btn btn-sm sort-btn error-sort-btn" data-sort="errors-first" title="Sort errors first">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>` : ''}
+                            </div>
+                            <div class="distinct-values-table" id="distinctCurrenciesTable">
                                 <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
-                                    <div class="value-cell">Currency</div>
+                                    <div class="value-cell">${columnName}</div>
                                     <div class="count-cell">Count</div>
                                 </div>
                     `;
@@ -2477,13 +2809,11 @@
                         const value = item.value || 'NULL';
                         const count = item.count || 0;
                         const isInvalid = invalidCurrencyCodes.includes(value.toUpperCase());
-                        const isMismatched = mismatchedCurrencyCodes.includes(value.toUpperCase());
-                        const isProblematic = isInvalid || isMismatched;
-                        const rowStyle = isProblematic ? 'color: #dc3545; background-color: #f8d7da;' : '';
-                        const filterType = isInvalid ? 'invalid-currency-code' : (isMismatched ? 'currency-mismatch' : 'value');
+                        const rowClass = isInvalid ? 'error-highlighted' : '';
+                        const filterType = isInvalid ? 'invalid-currency-code' : 'value';
                         
                         statsHtml += `
-                            <div class="distinct-value-row clickable-distinct" data-filter-type="${filterType}" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}" style="${rowStyle}">
+                            <div class="distinct-value-row clickable-distinct ${rowClass}" data-filter-type="${filterType}" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}">
                                 <div class="value-cell" title="${value}">${value}</div>
                                 <div class="count-cell">${count}</div>
                             </div>
@@ -2495,7 +2825,301 @@
                         </div>
                     `;
                 }
-            } else if (columnCategory === 'string' || columnName.toLowerCase().includes('email') || columnName.toLowerCase().includes('name')) {
+            } else if (columnCategory === 'region_category') {
+                // Calculate null rows, invalid region categories, and region mismatches
+                const nullCount = stats.null_count || 0;
+                const invalidRegionCategoryCount = stats.invalid_region_category_count || 0;
+                const invalidRegionCategories = stats.invalid_region_categories || [];
+                const mismatchedRegionCategoryCount = stats.mismatched_region_category_count || 0;
+                const mismatchedRegionCategories = stats.mismatched_region_categories || [];
+                const distinctRegions = stats.distinct_regions || [];
+                const columnInTable = currentColumnStats.column_in_table || 'country_code';
+                
+                // Add basic statistics - null rows, invalid region categories, and region mismatches
+                statsHtml += `
+                    <div class="stat-line clickable-stat" data-filter-type="null" data-column="${columnName}">
+                        <span class="stat-label">Null rows</span>
+                        <span class="stat-value">${nullCount}</span>
+                    </div>
+                    <div class="stat-line clickable-stat" data-filter-type="invalid-region-categories" data-column="${columnName}">
+                        <span class="stat-label">Invalid region categories</span>
+                        <span class="stat-value">${invalidRegionCategoryCount}</span>
+                    </div>
+                    <div class="stat-line clickable-stat" data-filter-type="region-mismatches" data-column="${columnName}">
+                        <span class="stat-label">Region mismatches</span>
+                        <span class="stat-value">${mismatchedRegionCategoryCount}</span>
+                    </div>
+                `;
+                
+                // Add distinct regions table with headers
+                if (distinctRegions.length > 0) {
+                    // Check if any regions have mismatches for showing error sort button
+                    const hasMismatches = mismatchedRegionCategories.length > 0;
+                    const hasInvalidRegions = invalidRegionCategories.length > 0;
+                    const hasErrors = hasMismatches || hasInvalidRegions;
+                    
+                    statsHtml += `
+                        <div class="distinct-values-section">
+                            <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Region Distribution:</div>
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                ${hasErrors ? `<button class="btn btn-sm sort-btn error-sort-btn" data-sort="errors-first" title="Sort errors first">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>` : ''}
+                            </div>
+                            <div class="distinct-values-table" id="distinctRegionsTable">
+                                <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
+                                    <div class="value-cell">${columnInTable}</div>
+                                    <div class="value-cell">${columnName}</div>
+                                    <div class="count-cell">Count</div>
+                                </div>
+                    `;
+                    
+                    // Show all distinct regions
+                    distinctRegions.forEach(item => {
+                        // Handle nested value structure: {country_code: "US", region_category: "ASIA"}
+                        let regionValue = 'NULL';
+                        let countryValue = 'NULL';
+                        let displayValue = 'NULL';
+                        let hasRelatedColumn = false;
+                        
+                        if (item.value && typeof item.value === 'object') {
+                            // New nested structure
+                            regionValue = item.value[columnName] || 'NULL';
+                            countryValue = item.value[columnInTable] || 'NULL';
+                            displayValue = regionValue;
+                            hasRelatedColumn = true;
+                        } else if (item.value) {
+                            // Fallback for old flat structure
+                            regionValue = item.value;
+                            displayValue = regionValue;
+                            hasRelatedColumn = false;
+                        }
+                        
+                        const count = item.count || 0;
+                        
+                        // Check if this region is invalid
+                        const isInvalid = invalidRegionCategories.some(inv => 
+                            typeof inv === 'string' ? inv.toUpperCase() === regionValue.toUpperCase() : inv === regionValue
+                        );
+                        
+                        // Check if this specific country-region combination is mismatched
+                        let isMismatched = false;
+                        
+                        if (mismatchedRegionCategories && mismatchedRegionCategories.length > 0) {
+                            isMismatched = mismatchedRegionCategories.some(mismatch => {
+                                if (typeof mismatch === 'object' && mismatch !== null) {
+                                    // Handle object structure: {region_category: "ASIA", country_code: "US"}
+                                    const mismatchRegion = String(mismatch.region_category || mismatch[columnName] || '').toUpperCase();
+                                    const mismatchCountry = String(mismatch.country_code || mismatch[columnInTable] || '').toUpperCase();
+                                    const currentRegion = String(regionValue).toUpperCase();
+                                    const currentCountry = String(countryValue).toUpperCase();
+                                    
+                                    return mismatchRegion === currentRegion && mismatchCountry === currentCountry;
+                                } else if (typeof mismatch === 'string') {
+                                    // Handle string structure (fallback)
+                                    return mismatch.toUpperCase() === regionValue.toUpperCase();
+                                }
+                                return false;
+                            });
+                        }
+                        
+                        // Apply error highlighting to both invalid and mismatched records
+                        const rowClass = (isInvalid || isMismatched) ? 'error-highlighted' : '';
+                        const filterType = isInvalid ? 'invalid-region-category' : (isMismatched ? 'region-mismatch' : (hasRelatedColumn ? 'combination' : 'value'));
+                        
+                        // Add related column data attributes if available
+                        const relatedColumnAttr = hasRelatedColumn ? `data-related-column="${columnInTable}" data-related-value="${countryValue.replace(/'/g, "\\'")}"` : '';
+                        
+                        statsHtml += `
+                            <div class="distinct-value-row clickable-distinct ${rowClass}" data-filter-type="${filterType}" data-column="${columnName}" data-value="${displayValue.replace(/'/g, "\\'")}" ${relatedColumnAttr}>
+                                <div class="value-cell" title="${countryValue}">${countryValue}</div>
+                                <div class="value-cell" title="${regionValue}">${regionValue}</div>
+                                <div class="count-cell">${count}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    statsHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+            } else if (columnCategory === 'postal_code') {
+                // Calculate null rows and mismatched postal codes
+                const nullCount = stats.null_count || 0;
+                const mismatchedPostalCodeCount = stats.mismatched_postal_code_count || 0;
+                const mismatchedPostalCodes = stats.mismatched_postal_codes || [];
+                const distinctPostalCodes = stats.distinct_postal_codes || [];
+                const columnInTable = currentColumnStats.column_in_table || 'country_code';
+                
+                // Add basic statistics - null rows and mismatched postal codes
+                statsHtml += `
+                    <div class="stat-line clickable-stat" data-filter-type="null" data-column="${columnName}">
+                        <span class="stat-label">Null rows</span>
+                        <span class="stat-value">${nullCount}</span>
+                    </div>
+                    <div class="stat-line clickable-stat" data-filter-type="postal-code-mismatches" data-column="${columnName}">
+                        <span class="stat-label">Mismatched postal codes</span>
+                        <span class="stat-value">${mismatchedPostalCodeCount}</span>
+                    </div>
+                `;
+                
+                // Add distinct postal codes table with headers (always includes country)
+                if (distinctPostalCodes.length > 0) {
+                    const hasMismatches = mismatchedPostalCodeCount > 0;
+                    
+                    statsHtml += `
+                        <div class="distinct-values-section">
+                            <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Postal Code Distribution:</div>
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                ${hasMismatches ? `<button class="btn btn-sm sort-btn error-sort-btn" data-sort="errors-first" title="Sort errors first">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>` : ''}
+                            </div>
+                            <div class="distinct-values-table" id="distinctPostalCodesTable">
+                                <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
+                                    <div class="value-cell">${columnInTable}</div>
+                                    <div class="value-cell">${columnName}</div>
+                                    <div class="count-cell">Count</div>
+                                </div>
+                    `;
+                    
+                    // Show all distinct postal codes (always with country)
+                    distinctPostalCodes.forEach(item => {
+                        // Handle nested value structure: {country_code: "US", postal_code: "12345"}
+                        // Unlike region_category, postal_code will ALWAYS have country in distinct
+                        let postalValue = 'NULL';
+                        let countryValue = 'NULL';
+                        let displayValue = 'NULL';
+                        
+                        if (item.value && typeof item.value === 'object') {
+                            // New nested structure (always present for postal_code)
+                            postalValue = item.value[columnName] || 'NULL';
+                            countryValue = item.value[columnInTable] || 'NULL';
+                            displayValue = postalValue;
+                        } else if (item.value) {
+                            // Fallback for old flat structure (shouldn't happen for postal_code)
+                            postalValue = item.value;
+                            displayValue = postalValue;
+                        }
+                        
+                        const count = item.count || 0;
+                        
+                        // Check if this specific country-postal code combination is mismatched
+                        let isMismatched = false;
+                        
+                        if (mismatchedPostalCodes && mismatchedPostalCodes.length > 0) {
+                            isMismatched = mismatchedPostalCodes.some(mismatch => {
+                                if (typeof mismatch === 'object' && mismatch !== null) {
+                                    // Handle object structure: {postal_code: "12345", country_code: "US"}
+                                    const mismatchPostal = String(mismatch.postal_code || mismatch[columnName] || '').toUpperCase();
+                                    const mismatchCountry = String(mismatch.country_code || mismatch[columnInTable] || '').toUpperCase();
+                                    const currentPostal = String(postalValue).toUpperCase();
+                                    const currentCountry = String(countryValue).toUpperCase();
+                                    
+                                    return mismatchPostal === currentPostal && mismatchCountry === currentCountry;
+                                } else if (typeof mismatch === 'string') {
+                                    // Handle string structure (fallback)
+                                    return mismatch.toUpperCase() === postalValue.toUpperCase();
+                                }
+                                return false;
+                            });
+                        }
+                        
+                        // Apply error highlighting to mismatched records
+                        const rowClass = isMismatched ? 'error-highlighted' : '';
+                        const filterType = isMismatched ? 'postal-code-mismatch' : 'combination';
+                        
+                        statsHtml += `
+                            <div class="distinct-value-row clickable-distinct ${rowClass}" data-filter-type="${filterType}" data-column="${columnName}" data-value="${displayValue.replace(/'/g, "\\'")}" data-related-column="${columnInTable}" data-related-value="${countryValue.replace(/'/g, "\\'")}">
+                                <div class="value-cell" title="${countryValue}">${countryValue}</div>
+                                <div class="value-cell" title="${postalValue}">${postalValue}</div>
+                                <div class="count-cell">${count}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    statsHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+            } else if (columnCategory === 'units') {
+                // Calculate null rows, distinct units, and invalid units
+                const nullCount = stats.null_count || 0;
+                const distinctValues = stats.distinct_values || [];
+                const invalidUnits = stats.invalid_units || [];
+                
+                // Add basic statistics - null rows and invalid units
+                statsHtml += `
+                    <div class="stat-line clickable-stat" data-filter-type="null" data-column="${columnName}">
+                        <span class="stat-label">Null rows</span>
+                        <span class="stat-value">${nullCount}</span>
+                    </div>
+                    <div class="stat-line clickable-stat" data-filter-type="invalid-units" data-column="${columnName}">
+                        <span class="stat-label">Invalid units</span>
+                        <span class="stat-value">${invalidUnits.length}</span>
+                    </div>
+                `;
+                
+                // Add distinct values table with headers
+                if (distinctValues.length > 0) {
+                    const hasErrors = distinctValues.some(item => invalidUnits.includes(item.value));
+                    statsHtml += `
+                        <div class="distinct-values-section">
+                            <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Units Distribution:</div>
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                ${hasErrors ? `<button class="btn btn-sm sort-btn error-sort-btn" data-sort="errors-first" title="Sort errors first">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                </button>` : ''}
+                            </div>
+                            <div class="distinct-values-table" id="distinctUnitsTable">
+                                <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
+                                    <div class="value-cell">${columnName}</div>
+                                    <div class="count-cell">Count</div>
+                                </div>
+                    `;
+                    
+                    // Show all distinct units
+                    distinctValues.forEach(item => {
+                        const value = item.value || 'NULL';
+                        const count = item.count || 0;
+                        const isInvalid = invalidUnits.includes(value);
+                        const rowClass = isInvalid ? 'error-highlighted' : '';
+                        const filterType = isInvalid ? 'invalid-unit' : 'value';
+                        
+                        statsHtml += `
+                            <div class="distinct-value-row clickable-distinct ${rowClass}" data-filter-type="${filterType}" data-column="${columnName}" data-value="${value.replace(/'/g, "\\'")}">
+                                <div class="value-cell" title="${value}">${value}</div>
+                                <div class="count-cell">${count}</div>
+                            </div>
+                        `;
+                    });
+                    
+                    statsHtml += `
+                            </div>
+                        </div>
+                    `;
+                }
+            } else if (columnCategory === 'string') {
                 // Calculate null and non-null rows
                 const totalCount = stats.total_count || 0;
                 const nullCount = stats.null_count || 0;
@@ -2523,7 +3147,19 @@
                     statsHtml += `
                         <div class="distinct-values-section">
                             <div class="stat-label" style="margin-bottom: 5px; font-weight: 600;">Value Distribution:</div>
-                            <div class="distinct-values-table">
+                            <div class="sorting-controls">
+                                <button class="btn btn-sm sort-btn" data-sort="value-asc" title="Sort A-Z">
+                                    <i class="fas fa-chevron-up"></i>
+                                </button>
+                                <button class="btn btn-sm sort-btn" data-sort="value-desc" title="Sort Z-A">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="distinct-values-table" id="distinctValuesTable">
+                                <div class="distinct-value-row header-row" style="font-weight: 600; background-color: #e9ecef; border-bottom: 2px solid #dee2e6;">
+                                    <div class="value-cell">${columnName}</div>
+                                    <div class="count-cell">Count</div>
+                                </div>
                     `;
                     
                     // Show all distinct values
@@ -2548,6 +3184,68 @@
             
             // Add event listeners for clickable rows
             addClickableRowListeners();
+            
+            // Add sorting event listeners
+            addSortingListeners();
+        }
+        
+        function addSortingListeners() {
+            // Add listeners for sorting buttons
+            document.querySelectorAll('.sort-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const sortType = this.getAttribute('data-sort');
+                    const tableContainer = this.closest('.distinct-values-section').querySelector('.distinct-values-table');
+                    
+                    // Remove active class from all buttons in this section
+                    this.closest('.sorting-controls').querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Sort the table
+                    sortDistributionTable(tableContainer, sortType);
+                });
+            });
+        }
+        
+        function sortDistributionTable(tableContainer, sortType) {
+            const rows = Array.from(tableContainer.querySelectorAll('.distinct-value-row:not(.header-row)'));
+            const headerRow = tableContainer.querySelector('.distinct-value-row.header-row');
+            
+            // Sort the rows based on sortType
+            rows.sort((a, b) => {
+                const aValue = a.querySelector('.value-cell').textContent.trim();
+                const bValue = b.querySelector('.value-cell').textContent.trim();
+                const aCount = parseInt(a.querySelector('.count-cell').textContent.trim()) || 0;
+                const bCount = parseInt(b.querySelector('.count-cell').textContent.trim()) || 0;
+                
+                // Check if rows have error highlighting
+                const aHasError = a.classList.contains('error-highlighted');
+                const bHasError = b.classList.contains('error-highlighted');
+                
+                switch(sortType) {
+                    case 'value-asc':
+                        return aValue.localeCompare(bValue);
+                    case 'value-desc':
+                        return bValue.localeCompare(aValue);
+                    case 'errors-first':
+                        // Sort errors first, then by value
+                        if (aHasError && !bHasError) return -1;
+                        if (!aHasError && bHasError) return 1;
+                        return aValue.localeCompare(bValue);
+                    default:
+                        return 0;
+                }
+            });
+            
+            // Clear the table and re-append rows
+            tableContainer.innerHTML = '';
+            if (headerRow) {
+                tableContainer.appendChild(headerRow);
+            }
+            rows.forEach(row => tableContainer.appendChild(row));
         }
         
         function addClickableRowListeners() {
@@ -2576,8 +3274,17 @@
                         case 'invalid-currency-codes':
                             filterByInvalidCurrencyCodes(columnName);
                             break;
-                        case 'currency-mismatches':
-                            filterByCurrencyMismatches(columnName);
+                        case 'invalid-region-categories':
+                            filterByInvalidRegionCategories(columnName);
+                            break;
+                        case 'region-mismatches':
+                            filterByRegionMismatches(columnName);
+                            break;
+                        case 'postal-code-mismatches':
+                            filterByPostalCodeMismatches(columnName);
+                            break;
+                        case 'invalid-units':
+                            filterByInvalidUnits(columnName);
                             break;
                     }
                 });
@@ -2589,11 +3296,25 @@
                     const columnName = this.getAttribute('data-column');
                     const value = this.getAttribute('data-value');
                     const filterType = this.getAttribute('data-filter-type');
+                    const relatedColumn = this.getAttribute('data-related-column');
+                    const relatedValue = this.getAttribute('data-related-value');
                     
-                    if (filterType === 'invalid-date') {
+                    // PRIORITY: If both columns are present, use combination filtering
+                    // This handles all cases (normal, mismatch, errors) with related data
+                    if (relatedColumn && relatedValue) {
+                        filterByColumnCombination(columnName, value, relatedColumn, relatedValue);
+                    } else if (filterType === 'invalid-date') {
                         filterByInvalidDateValue(columnName, value);
                     } else if (filterType === 'invalid-country-code') {
                         filterByInvalidCountryCodeValue(columnName, value);
+                    } else if (filterType === 'invalid-region-category') {
+                        filterByInvalidRegionCategoryValue(columnName, value);
+                    } else if (filterType === 'region-mismatch') {
+                        filterByRegionMismatchValue(columnName, value);
+                    } else if (filterType === 'postal-code-mismatch') {
+                        filterByPostalCodeMismatchValue(columnName, value);
+                    } else if (filterType === 'invalid-unit') {
+                        filterByInvalidUnitValue(columnName, value);
                     } else if (filterType === 'value' && columnName.toLowerCase().includes('country')) {
                         filterByCountryValue(columnName, value);
                     } else {
@@ -2806,39 +3527,6 @@
             hideColumnStatsPopup();
         }
         
-        function filterByCurrencyMismatches(columnName) {
-            addFilterForColumn(columnName);
-            // Set the filter to IN with currency mismatches
-            setTimeout(() => {
-                const filterItems = document.querySelectorAll('.filter-item');
-                const latestFilter = filterItems[filterItems.length - 1];
-                if (latestFilter) {
-                    const operatorSelect = latestFilter.querySelector('.filter-operator');
-                    const valueInput = latestFilter.querySelector('.filter-value');
-                    const valueArray = latestFilter.querySelector('.filter-value-array');
-                    
-                    operatorSelect.value = 'IN';
-                    handleOperatorChange(latestFilter.id);
-                    
-                    // Get currency mismatches from the current statistics data
-                    if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.mismatched_currency_codes) {
-                        const mismatchedCurrencyCodes = currentColumnStats.statistics.mismatched_currency_codes;
-                        valueArray.value = mismatchedCurrencyCodes.join(',');
-                        valueInput.value = `${mismatchedCurrencyCodes.length} currency mismatch(es) selected`;
-                    } else {
-                        valueInput.value = 'Currency mismatches';
-                        valueArray.value = 'currency_mismatches_placeholder';
-                    }
-                    
-                    // Automatically apply the filter
-                    applyFilters();
-                }
-            }, 100);
-            
-            // Close popup
-            hideColumnStatsPopup();
-        }
-        
         function filterByInvalidCountryCodeValue(columnName, value) {
             addFilterForColumn(columnName);
             // Set the filter to = invalid country code value
@@ -2880,18 +3568,438 @@
             // Close popup
             hideColumnStatsPopup();
         }
-
-        function sortByColumn(columnName) {
-            // Always sort in ascending order on single click
-            const newSortDirection = 'asc';
+        
+        function filterByColumnCombination(columnName, value, relatedColumn, relatedValue) {
+            // Add filter for the main column
+            addFilterForColumn(columnName);
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const mainFilter = filterItems[filterItems.length - 1];
+                if (mainFilter) {
+                    const operatorSelect = mainFilter.querySelector('.filter-operator');
+                    const valueInput = mainFilter.querySelector('.filter-value');
+                    operatorSelect.value = '=';
+                    valueInput.value = value;
+                }
+                
+                // Add filter for the related column
+                addFilterForColumn(relatedColumn);
+                setTimeout(() => {
+                    const filterItems = document.querySelectorAll('.filter-item');
+                    const relatedFilter = filterItems[filterItems.length - 1];
+                    if (relatedFilter) {
+                        const operatorSelect = relatedFilter.querySelector('.filter-operator');
+                        const valueInput = relatedFilter.querySelector('.filter-value');
+                        operatorSelect.value = '=';
+                        valueInput.value = relatedValue;
+                    }
+                    
+                    // Automatically apply both filters
+                    applyFilters();
+                }, 150);
+            }, 100);
             
+            // Close popup
+            hideColumnStatsPopup();
+        }
+        
+        function filterByInvalidRegionCategories(columnName) {
+            addFilterForColumn(columnName);
+            // Set the filter to IN with invalid region categories
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const latestFilter = filterItems[filterItems.length - 1];
+                if (latestFilter) {
+                    const operatorSelect = latestFilter.querySelector('.filter-operator');
+                    const valueInput = latestFilter.querySelector('.filter-value');
+                    const valueArray = latestFilter.querySelector('.filter-value-array');
+                    
+                    operatorSelect.value = 'IN';
+                    handleOperatorChange(latestFilter.id);
+                    
+                    // Get invalid region categories from the current statistics data
+                    if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.invalid_region_categories) {
+                        const invalidRegionCategories = currentColumnStats.statistics.invalid_region_categories;
+                        valueArray.value = invalidRegionCategories.join(',');
+                        valueInput.value = `${invalidRegionCategories.length} invalid region category(ies) selected`;
+                    } else {
+                        valueInput.value = 'Invalid region categories';
+                        valueArray.value = 'invalid_region_categories_placeholder';
+                    }
+                    
+                    // Automatically apply the filter
+                    applyFilters();
+                }
+                
+                // Close popup
+                hideColumnStatsPopup();
+            }, 100);
+        }
+        
+        function filterByRegionMismatches(columnName) {
+            // Get region mismatches from the current statistics data
+            if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.mismatched_region_categories) {
+                const mismatchedRegionCategories = currentColumnStats.statistics.mismatched_region_categories;
+                const columnInTable = currentColumnStats.column_in_table;
+                
+                // Store the paired mismatch data for backend processing
+                const mismatchPairs = JSON.stringify(mismatchedRegionCategories);
+                
+                // Add filter for the analyzed column (e.g., region_category) with special indicator
+                addFilterForColumn(columnName);
+                setTimeout(() => {
+                    const filterItems = document.querySelectorAll('.filter-item');
+                    const latestFilter = filterItems[filterItems.length - 1];
+                    if (latestFilter) {
+                        const operatorSelect = latestFilter.querySelector('.filter-operator');
+                        const valueInput = latestFilter.querySelector('.filter-value');
+                        const valueArray = latestFilter.querySelector('.filter-value-array');
+                        
+                        operatorSelect.value = 'MISMATCH';
+                        handleOperatorChange(latestFilter.id);
+                        
+                        // Store the mismatch pairs data in a hidden field
+                        valueArray.value = mismatchPairs;
+                        valueInput.value = `${mismatchedRegionCategories.length} mismatch(es) with ${columnInTable || 'related column'}`;
+                        valueInput.readOnly = true;
+                        valueInput.style.cursor = 'not-allowed';
+                        valueInput.style.backgroundColor = '#f8f9fa';
+                    }
+                    
+                    // Automatically apply the filter
+                    setTimeout(() => {
+                        applyFilters();
+                    }, 200);
+                }, 100);
+            } else {
+                // Fallback if no mismatch data
+                addFilterForColumn(columnName);
+                setTimeout(() => {
+                    const filterItems = document.querySelectorAll('.filter-item');
+                    const latestFilter = filterItems[filterItems.length - 1];
+                    if (latestFilter) {
+                        const operatorSelect = latestFilter.querySelector('.filter-operator');
+                        const valueInput = latestFilter.querySelector('.filter-value');
+                        operatorSelect.value = '=';
+                        valueInput.value = 'No region mismatches found';
+                    }
+                }, 100);
+            }
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+        
+        function filterByRegionMismatchValue(columnName, regionValue) {
+            // For region mismatches, we need to filter by both region_category and country_code
+            // Find the country_code column name (could be 'country_code', 'country', etc.)
+            const countryColumn = columns.find(col => 
+                col.name.toLowerCase().includes('country') && 
+                col.name.toLowerCase().includes('code')
+            );
+            
+            if (!countryColumn) {
+                // If no country_code column found, just filter by region_category
+                filterByValue(columnName, regionValue);
+                return;
+            }
+            
+            // Get the country code value from the mismatch data in current statistics
+            let countryValue = null;
+            if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.mismatched_region_categories) {
+                const mismatchDetails = currentColumnStats.statistics.mismatched_region_categories;
+                // Find the country code for this region category
+                const matchingDetail = mismatchDetails.find(detail => detail.region_category === regionValue);
+                if (matchingDetail && matchingDetail.country_code) {
+                    countryValue = matchingDetail.country_code;
+                }
+            }
+            
+            // Add filter for region_category
+            addFilterForColumn(columnName);
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const regionFilter = filterItems[filterItems.length - 1];
+                if (regionFilter) {
+                    const operatorSelect = regionFilter.querySelector('.filter-operator');
+                    const valueInput = regionFilter.querySelector('.filter-value');
+                    operatorSelect.value = '=';
+                    valueInput.value = regionValue;
+                }
+                
+                // Add filter for country_code if we have a country value
+                if (countryValue && countryColumn) {
+                    addFilterForColumn(countryColumn.name);
+                    setTimeout(() => {
+                        const filterItems = document.querySelectorAll('.filter-item');
+                        const countryFilter = filterItems[filterItems.length - 1];
+                        if (countryFilter) {
+                            const operatorSelect = countryFilter.querySelector('.filter-operator');
+                            const valueInput = countryFilter.querySelector('.filter-value');
+                            const valueArray = countryFilter.querySelector('.filter-value-array');
+                            
+                            // Check if there are multiple country codes
+                            if (countryValue.includes(',')) {
+                                // Multiple country codes - use IN operator
+                                operatorSelect.value = 'IN';
+                                handleOperatorChange(countryFilter.id);
+                                valueArray.value = countryValue;
+                                const countryCount = countryValue.split(',').length;
+                                valueInput.value = `${countryCount} country code(s) selected`;
+                            } else {
+                                // Single country code - use = operator
+                                operatorSelect.value = '=';
+                                valueInput.value = countryValue;
+                            }
+                        }
+                        
+                        // Automatically apply the filters
+                        applyFilters();
+                    }, 150);
+                } else {
+                    // No country value found, just apply the region filter
+                    applyFilters();
+                }
+            }, 100);
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+
+        function filterByInvalidRegionCategoryValue(columnName, regionValue) {
+            // Filter by a specific invalid region category value
+            addFilterForColumn(columnName);
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const regionFilter = filterItems[filterItems.length - 1];
+                if (regionFilter) {
+                    const operatorSelect = regionFilter.querySelector('.filter-operator');
+                    const valueInput = regionFilter.querySelector('.filter-value');
+                    operatorSelect.value = '=';
+                    valueInput.value = regionValue;
+                    
+                    // Automatically apply the filter
+                    applyFilters();
+                }
+                
+                // Close popup
+                hideColumnStatsPopup();
+            }, 100);
+        }
+        
+        function filterByPostalCodeMismatches(columnName) {
+            // Get postal code mismatches from the current statistics data
+            if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.mismatched_postal_codes) {
+                const mismatchedPostalCodes = currentColumnStats.statistics.mismatched_postal_codes;
+                const columnInTable = currentColumnStats.column_in_table;
+                
+                // Store the paired mismatch data for backend processing
+                const mismatchPairs = JSON.stringify(mismatchedPostalCodes);
+                
+                // Add filter for the analyzed column (e.g., postal_code) with special indicator
+                addFilterForColumn(columnName);
+                setTimeout(() => {
+                    const filterItems = document.querySelectorAll('.filter-item');
+                    const latestFilter = filterItems[filterItems.length - 1];
+                    if (latestFilter) {
+                        const operatorSelect = latestFilter.querySelector('.filter-operator');
+                        const valueInput = latestFilter.querySelector('.filter-value');
+                        const valueArray = latestFilter.querySelector('.filter-value-array');
+                        
+                        operatorSelect.value = 'MISMATCH';
+                        handleOperatorChange(latestFilter.id);
+                        
+                        // Store the mismatch pairs data in a hidden field
+                        valueArray.value = mismatchPairs;
+                        valueInput.value = `${mismatchedPostalCodes.length} mismatch(es) with ${columnInTable || 'related column'}`;
+                        valueInput.readOnly = true;
+                        valueInput.style.cursor = 'not-allowed';
+                        valueInput.style.backgroundColor = '#f8f9fa';
+                    }
+                    
+                    // Automatically apply the filter
+                    setTimeout(() => {
+                        applyFilters();
+                    }, 200);
+                }, 100);
+            } else {
+                // Fallback if no mismatch data
+                addFilterForColumn(columnName);
+                setTimeout(() => {
+                    const filterItems = document.querySelectorAll('.filter-item');
+                    const latestFilter = filterItems[filterItems.length - 1];
+                    if (latestFilter) {
+                        const operatorSelect = latestFilter.querySelector('.filter-operator');
+                        const valueInput = latestFilter.querySelector('.filter-value');
+                        operatorSelect.value = '=';
+                        valueInput.value = 'No postal code mismatches found';
+                    }
+                }, 100);
+            }
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+        
+        function filterByPostalCodeMismatchValue(columnName, postalValue) {
+            // Get the mismatch details for this postal code value
+            if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.mismatched_postal_codes) {
+                const mismatchDetails = currentColumnStats.statistics.mismatched_postal_codes;
+                const columnInTable = currentColumnStats.column_in_table;
+                
+                // Find the matching detail for this postal code
+                const matchingDetail = mismatchDetails.find(detail => 
+                    (detail.postal_code || detail.value || detail[columnName]) === postalValue
+                );
+                
+                if (!matchingDetail) {
+                    // If no match found, just filter by the postal value
+                    filterByValue(columnName, postalValue);
+                    return;
+                }
+                
+                // Extract the value for the analyzed column (column_name)
+                const columnValue = matchingDetail[columnName];
+                
+                if (columnValue !== undefined && columnValue !== null) {
+                    // Add filter for the analyzed column (e.g., postal_code)
+                    addFilterForColumn(columnName);
+                    setTimeout(() => {
+                        const filterItems = document.querySelectorAll('.filter-item');
+                        const currentFilter = filterItems[filterItems.length - 1];
+                        if (currentFilter) {
+                            const operatorSelect = currentFilter.querySelector('.filter-operator');
+                            const valueInput = currentFilter.querySelector('.filter-value');
+                            const valueArray = currentFilter.querySelector('.filter-value-array');
+                            
+                            // Check if the value contains multiple items (comma-separated)
+                            if (typeof columnValue === 'string' && columnValue.includes(',')) {
+                                // Multiple values - use IN operator
+                                operatorSelect.value = 'IN';
+                                handleOperatorChange(currentFilter.id);
+                                valueArray.value = columnValue;
+                                const valueCount = columnValue.split(',').length;
+                                valueInput.value = `${valueCount} ${columnName}(s) selected`;
+                            } else {
+                                // Single value - use = operator
+                                operatorSelect.value = '=';
+                                valueInput.value = columnValue;
+                            }
+                        }
+                    }, 100);
+                }
+                
+                // Add filter for the related column (column_in_table) if it exists
+                if (columnInTable && matchingDetail[columnInTable] !== undefined && matchingDetail[columnInTable] !== null) {
+                    setTimeout(() => {
+                        const relatedColumnValue = matchingDetail[columnInTable];
+                        
+                        addFilterForColumn(columnInTable);
+                        setTimeout(() => {
+                            const filterItems = document.querySelectorAll('.filter-item');
+                            const currentFilter = filterItems[filterItems.length - 1];
+                            if (currentFilter) {
+                                const operatorSelect = currentFilter.querySelector('.filter-operator');
+                                const valueInput = currentFilter.querySelector('.filter-value');
+                                const valueArray = currentFilter.querySelector('.filter-value-array');
+                                
+                                // Check if the value contains multiple items (comma-separated)
+                                if (typeof relatedColumnValue === 'string' && relatedColumnValue.includes(',')) {
+                                    // Multiple values - use IN operator
+                                    operatorSelect.value = 'IN';
+                                    handleOperatorChange(currentFilter.id);
+                                    valueArray.value = relatedColumnValue;
+                                    const valueCount = relatedColumnValue.split(',').length;
+                                    valueInput.value = `${valueCount} ${columnInTable}(s) selected`;
+                                } else {
+                                    // Single value - use = operator
+                                    operatorSelect.value = '=';
+                                    valueInput.value = relatedColumnValue;
+                                }
+                            }
+                            
+                            // Automatically apply the filters
+                            applyFilters();
+                        }, 100);
+                    }, 200);
+                } else {
+                    // If no related column, just apply the single filter
+                    setTimeout(() => {
+                        applyFilters();
+                    }, 250);
+                }
+            } else {
+                // Fallback - just filter by the postal value
+                filterByValue(columnName, postalValue);
+            }
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+
+        function filterByInvalidUnits(columnName) {
+            addFilterForColumn(columnName);
+            // Set the filter to IN with invalid units
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const latestFilter = filterItems[filterItems.length - 1];
+                if (latestFilter) {
+                    const operatorSelect = latestFilter.querySelector('.filter-operator');
+                    const valueInput = latestFilter.querySelector('.filter-value');
+                    const valueArray = latestFilter.querySelector('.filter-value-array');
+                    
+                    operatorSelect.value = 'IN';
+                    handleOperatorChange(latestFilter.id);
+                    
+                    // Get invalid units from the current statistics data
+                    if (currentColumnStats && currentColumnStats.statistics && currentColumnStats.statistics.invalid_units) {
+                        const invalidUnits = currentColumnStats.statistics.invalid_units;
+                        valueArray.value = invalidUnits.join(',');
+                        valueInput.value = `${invalidUnits.length} invalid unit(s) selected`;
+                    } else {
+                        valueInput.value = 'Invalid units';
+                        valueArray.value = 'invalid_units_placeholder';
+                    }
+                    
+                    // Automatically apply the filter
+                    applyFilters();
+                }
+            }, 100);
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+
+        function filterByInvalidUnitValue(columnName, unitValue) {
+            addFilterForColumn(columnName);
+            // Set the filter to = invalid unit value
+            setTimeout(() => {
+                const filterItems = document.querySelectorAll('.filter-item');
+                const latestFilter = filterItems[filterItems.length - 1];
+                if (latestFilter) {
+                    const operatorSelect = latestFilter.querySelector('.filter-operator');
+                    const valueInput = latestFilter.querySelector('.filter-value');
+                    operatorSelect.value = '=';
+                    valueInput.value = unitValue;
+                    
+                    // Automatically apply the filter
+                    applyFilters();
+                }
+            }, 100);
+            
+            // Close popup
+            hideColumnStatsPopup();
+        }
+
+        function sortByColumn(columnName, sortDirection = 'asc') {
+            console.log('sortByColumn called:', columnName, sortDirection);
             // Reset to page 1 when sorting
             currentPage = 1;
             currentSortColumn = columnName;
-            currentSortDirection = newSortDirection;
+            currentSortDirection = sortDirection;
             
             // Reload data with new sorting
-            loadTableData(1, columnName, newSortDirection);
+            loadTableData(1, columnName, sortDirection);
         }
 
 
@@ -3027,6 +4135,7 @@
                             <option value="NOT IN">Not In List</option>
                             <option value="IS NULL">Is Null</option>
                             <option value="IS NOT NULL">Is Not Null</option>
+                            <option value="MISMATCH">Mismatch</option>
                         </select>
                         <div class="input-group" style="width: 70%; flex: 0 0 70%;">
                             <input type="text" class="form-control form-control-sm filter-value" placeholder="Value..." style="font-size: 0.6rem;">
@@ -3069,6 +4178,12 @@
                 valueInput.readOnly = true;
                 valueInput.value = '';
                 valueInput.placeholder = operator === 'IS NULL' ? 'NULL' : 'NOT NULL';
+                valueInput.style.cursor = 'not-allowed';
+                valueInput.style.backgroundColor = '#f8f9fa';
+                selectBtn.style.display = 'none';
+            } else if (operator === 'MISMATCH') {
+                // For MISMATCH operator, disable input (value is set programmatically)
+                valueInput.readOnly = true;
                 valueInput.style.cursor = 'not-allowed';
                 valueInput.style.backgroundColor = '#f8f9fa';
                 selectBtn.style.display = 'none';
@@ -3650,6 +4765,16 @@
                         operator: operator,
                         value: null  // Explicitly set to null for NULL operators
                     });
+                } else if (operator === 'MISMATCH') {
+                    // For MISMATCH operator, pass the JSON data from the hidden value-array field
+                    const mismatchData = valueArray && valueArray.value ? valueArray.value : '';
+                    if (mismatchData) {
+                        filters.push({
+                            column: column,
+                            operator: operator,
+                            value: mismatchData  // JSON string containing the mismatch pairs
+                        });
+                    }
                 } else if (operator === 'IN' || operator === 'NOT IN') {
                     // For IN and NOT IN operators, check both typed values and selected values
                     const typedValue = valueInput.value.trim();
@@ -3727,8 +4852,462 @@
             
             populateColumnSelector();
             
+            // Load saved sequences
+            loadSavedSequences();
+            
             const modal = new bootstrap.Modal(document.getElementById('columnSelectorModal'));
             modal.show();
+        }
+        
+        function toggleSavedSequences() {
+            const container = document.getElementById('savedSequencesContainer');
+            const chevron = document.getElementById('sequencesChevron');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                chevron.className = 'fas fa-chevron-up';
+            } else {
+                container.style.display = 'none';
+                chevron.className = 'fas fa-chevron-down';
+            }
+        }
+        
+        function loadSavedSequences() {
+            const csrfToken = getCookie('csrftoken');
+            const savedSequencesList = document.getElementById('savedSequencesList');
+            const noSequencesMessage = document.getElementById('noSequencesMessage');
+            
+            // Show loading state
+            document.getElementById('savedSequencesTable').style.display = 'table';
+            savedSequencesList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #6c757d; font-size: 0.9rem; padding: 1rem;"><i class="fas fa-spinner fa-spin"></i> Loading sequences...</td></tr>';
+            noSequencesMessage.style.display = 'none';
+            
+            fetch(`{% url "column-sequence-list-api" %}?table_name=${encodeURIComponent(currentTableName)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                savedSequencesList.innerHTML = '';
+                
+                if (data.sequences && data.sequences.length > 0) {
+                    document.getElementById('savedSequencesTable').style.display = 'table';
+                    noSequencesMessage.style.display = 'none';
+                    
+                    // Create table row for each sequence
+                    data.sequences.forEach(seq => {
+                        const row = document.createElement('tr');
+                        row.style.cursor = 'pointer';
+                        
+                        // Name Cell with inline scope (clickable)
+                        const nameCell = document.createElement('td');
+                        nameCell.style.padding = '0.6rem 0.8rem';
+                        nameCell.style.verticalAlign = 'middle';
+                        nameCell.style.width = '75%';
+                        
+                        const nameSpan = document.createElement('span');
+                        nameSpan.style.color = '#000000';
+                        nameSpan.style.fontWeight = '500';
+                        nameSpan.style.fontSize = '0.85rem';
+                        nameSpan.textContent = seq.seq_name;
+                        
+                        // Add scope inline with name
+                        const scopeText = document.createElement('span');
+                        scopeText.style.marginLeft = '0.5rem';
+                        scopeText.style.fontSize = '0.85rem';
+                        scopeText.style.fontWeight = '400';
+                        scopeText.style.color = '#6c757d';
+                        scopeText.style.fontStyle = 'italic';
+                        
+                        if (seq.scope === 'G') {
+                            scopeText.textContent = '(Global)';
+                            scopeText.title = 'Visible to all users in your organization';
+                        } else {
+                            scopeText.textContent = '(Local)';
+                            scopeText.title = 'Only visible to you';
+                        }
+                        
+                        nameCell.appendChild(nameSpan);
+                        nameCell.appendChild(scopeText);
+                        nameCell.title = `Click to load sequence: ${seq.seq_name}`;
+                        nameCell.addEventListener('click', function() {
+                            loadSequence(seq.seq_name);
+                        });
+                        row.appendChild(nameCell);
+                        
+                        // Actions Cell
+                        const actionsCell = document.createElement('td');
+                        actionsCell.style.padding = '0.6rem 0.8rem';
+                        actionsCell.style.textAlign = 'right';
+                        actionsCell.style.verticalAlign = 'middle';
+                        actionsCell.style.width = '25%';
+                        actionsCell.style.whiteSpace = 'nowrap';
+                        
+                        // Add edit/delete buttons (for all sequences, including global)
+                        if (seq.is_owner) {
+                            // Edit button
+                            const editBtn = document.createElement('button');
+                            editBtn.className = 'btn btn-sm btn-outline-secondary';
+                            editBtn.style.fontSize = '0.7rem';
+                            editBtn.style.padding = '0.2rem 0.4rem';
+                            editBtn.style.marginRight = '0.3rem';
+                            editBtn.innerHTML = '<i class="fas fa-edit"></i>';
+                            editBtn.title = 'Edit sequence';
+                            editBtn.addEventListener('click', function(e) {
+                                e.stopPropagation();
+                                showEditSequenceModal(seq.seq_name);
+                            });
+                            
+                            // Delete button
+                            const deleteBtn = document.createElement('button');
+                            deleteBtn.className = 'btn btn-sm btn-outline-danger';
+                            deleteBtn.style.fontSize = '0.7rem';
+                            deleteBtn.style.padding = '0.2rem 0.4rem';
+                            deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                            deleteBtn.title = 'Delete sequence';
+                            deleteBtn.addEventListener('click', function(e) {
+                                e.stopPropagation();
+                                showDeleteSequenceModal(seq.seq_name);
+                            });
+                            
+                            actionsCell.appendChild(editBtn);
+                            actionsCell.appendChild(deleteBtn);
+                        } else {
+                            // For sequences user doesn't own, show nothing
+                            actionsCell.innerHTML = '-';
+                            actionsCell.style.color = '#6c757d';
+                            actionsCell.style.textAlign = 'center';
+                        }
+                        
+                        row.appendChild(actionsCell);
+                        savedSequencesList.appendChild(row);
+                    });
+                } else {
+                    document.getElementById('savedSequencesTable').style.display = 'none';
+                    savedSequencesList.innerHTML = '';
+                    noSequencesMessage.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error loading sequences:', error);
+                document.getElementById('savedSequencesTable').style.display = 'table';
+                noSequencesMessage.style.display = 'none';
+                savedSequencesList.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #dc3545; font-size: 0.9rem; padding: 1rem;"><i class="fas fa-exclamation-triangle"></i> Failed to load sequences</td></tr>';
+            });
+        }
+        
+        function loadSequence(seqName) {
+            const csrfToken = getCookie('csrftoken');
+            
+            // Show loading indicator
+            showAlert(`Loading sequence: ${seqName}...`, 'info');
+            
+            fetch(`{% url "column-sequence-api" %}?table_name=${encodeURIComponent(currentTableName)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.sequences && data.sequences.length > 0) {
+                    // Find the specific sequence by name
+                    const sequence = data.sequences.find(seq => seq.seq_name === seqName);
+                    
+                    if (sequence && sequence.sequence) {
+                        // Parse the sequence array from PostgreSQL format
+                        let columnNames = [];
+                        let sequenceString = sequence.sequence;
+                        
+                        try {
+                            // Try JSON parse first (for arrays like ["col1","col2"])
+                            columnNames = JSON.parse(sequenceString);
+                        } catch (e) {
+                            // Handle PostgreSQL array format: {'column1','column2',...}
+                            if (typeof sequenceString === 'string') {
+                                // Remove curly braces and split by comma
+                                sequenceString = sequenceString.trim();
+                                if (sequenceString.startsWith('{') && sequenceString.endsWith('}')) {
+                                    // PostgreSQL array format
+                                    sequenceString = sequenceString.substring(1, sequenceString.length - 1);
+                                }
+                                // Split by comma and clean up each column name
+                                columnNames = sequenceString.split(',').map(name => {
+                                    // Remove quotes and trim whitespace
+                                    return name.trim().replace(/^['"]|['"]$/g, '');
+                                }).filter(name => name.length > 0);
+                            }
+                        }
+                        
+                        // Clear current selection
+                        selectedColumns = [];
+                        
+                        // Build selected columns array in the order specified by the sequence
+                        columnNames.forEach(colName => {
+                            const column = allColumns.find(col => col.name === colName);
+                            if (column) {
+                                selectedColumns.push(column);
+                            }
+                        });
+                        
+                        // Refresh the column selector display
+                        populateColumnSelector();
+                        
+                        showAlert(`Sequence "${seqName}" loaded successfully! ${selectedColumns.length} column(s) loaded.`, 'success');
+                    } else {
+                        showAlert(`Sequence "${seqName}" not found.`, 'warning');
+                    }
+                } else {
+                    showAlert('No sequences found.', 'warning');
+                }
+            })
+            .catch(error => {
+                console.error('Error loading sequence:', error);
+                showAlert(`Failed to load sequence: ${error.message}`, 'danger');
+            });
+        }
+        
+        // Save/Edit/Delete Sequence Functions
+        function showSaveSequenceModal() {
+            if (selectedColumns.length === 0) {
+                showAlert('Please select at least one column to save as a sequence', 'warning');
+                return;
+            }
+            
+            // Reset modal
+            document.getElementById('sequenceName').value = '';
+            document.getElementById('sequenceScope').value = 'L'; // Default to Local
+            document.getElementById('editingSequenceName').value = '';
+            document.getElementById('saveSequenceModalLabel').textContent = 'Save Column Sequence';
+            document.getElementById('confirmSaveSequenceBtn').innerHTML = '<i class="fas fa-save"></i> Save Sequence';
+            
+            // Show preview
+            const preview = document.getElementById('sequencePreview');
+            preview.innerHTML = selectedColumns.map((col, idx) => 
+                `<div style="padding: 0.2rem;"><strong>${idx + 1}.</strong> ${col.name} <span style="color: #6c757d; font-size: 0.75rem;">(${col.type})</span></div>`
+            ).join('');
+            
+            const modal = new bootstrap.Modal(document.getElementById('saveSequenceModal'));
+            modal.show();
+        }
+        
+        function showEditSequenceModal(seqName) {
+            // Load the sequence into editModalSelectedColumns
+            const csrfToken = getCookie('csrftoken');
+            
+            // First, get the sequence details including scope from the list API
+            fetch(`{% url "column-sequence-list-api" %}?table_name=${encodeURIComponent(currentTableName)}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(listData => {
+                const sequenceInfo = listData.sequences?.find(seq => seq.seq_name === seqName);
+                const currentScope = sequenceInfo?.scope || 'L';
+                
+                // Now get the full sequence data
+                return fetch(`{% url "column-sequence-api" %}?table_name=${encodeURIComponent(currentTableName)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.sequences && data.sequences.length > 0) {
+                        const sequence = data.sequences.find(seq => seq.seq_name === seqName);
+                        
+                        if (sequence && sequence.sequence) {
+                            // Parse and load the sequence
+                            let columnNames = [];
+                            let sequenceString = sequence.sequence;
+                            
+                            try {
+                                columnNames = JSON.parse(sequenceString);
+                            } catch (e) {
+                                if (typeof sequenceString === 'string') {
+                                    sequenceString = sequenceString.trim();
+                                    if (sequenceString.startsWith('{') && sequenceString.endsWith('}')) {
+                                        sequenceString = sequenceString.substring(1, sequenceString.length - 1);
+                                    }
+                                    columnNames = sequenceString.split(',').map(name => 
+                                        name.trim().replace(/^['"]|['"]$/g, '')
+                                    ).filter(name => name.length > 0);
+                                }
+                            }
+                            
+                            // Store the sequence name for updating
+                            editingSequenceName = seqName;
+                            
+                            // Clear and rebuild edit modal selected columns
+                            editModalSelectedColumns = [];
+                            columnNames.forEach(colName => {
+                                const column = allColumns.find(col => col.name === colName);
+                                if (column) {
+                                    editModalSelectedColumns.push(column);
+                                }
+                            });
+                            
+                            // Update modal title and scope
+                            document.getElementById('editSequenceNameDisplay').textContent = seqName;
+                            document.getElementById('editSequenceScope').value = currentScope;
+                            
+                            // Populate the edit modal column selector
+                            populateEditColumnSelector();
+                            
+                            // Show the edit modal
+                            const modal = new bootstrap.Modal(document.getElementById('editSequenceModal'));
+                            modal.show();
+                        }
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error loading sequence for edit:', error);
+                showAlert(`Failed to load sequence: ${error.message}`, 'danger');
+            });
+        }
+        
+        function showDeleteSequenceModal(seqName) {
+            document.getElementById('deleteSequenceName').textContent = seqName;
+            const modal = new bootstrap.Modal(document.getElementById('deleteSequenceModal'));
+            modal.show();
+        }
+        
+        function confirmSaveSequence() {
+            const seqName = document.getElementById('sequenceName').value.trim();
+            const scope = document.getElementById('sequenceScope').value; // Get scope from form
+            const oldSeqName = document.getElementById('editingSequenceName').value.trim();
+            
+            if (!seqName) {
+                showAlert('Please enter a sequence name', 'warning');
+                return;
+            }
+            
+            if (!scope) {
+                showAlert('Please select a scope', 'warning');
+                return;
+            }
+            
+            if (selectedColumns.length === 0) {
+                showAlert('Please select at least one column', 'warning');
+                return;
+            }
+            
+            // Convert selected columns to PostgreSQL array format
+            const columnNames = selectedColumns.map(col => col.name);
+            const sequenceString = '{' + columnNames.map(name => `"${name}"`).join(',') + '}';
+            
+            const csrfToken = getCookie('csrftoken');
+            const isEditing = oldSeqName && oldSeqName.length > 0;
+            
+            const requestData = {
+                table_name: currentTableName,
+                seq_name: seqName,
+                sequence: sequenceString,
+                scope: scope  // Use the scope value from the form (G or L)
+            };
+            
+            if (isEditing) {
+                requestData.old_seq_name = oldSeqName;
+            }
+            
+            const method = isEditing ? 'PUT' : 'POST';
+            const action = isEditing ? 'updated' : 'created';
+            
+            fetch('{% url "column-sequence-api" %}', {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('saveSequenceModal'));
+                modal.hide();
+                
+                // Reload sequences
+                loadSavedSequences();
+                
+                showAlert(data.message || `Sequence "${seqName}" ${action} successfully!`, 'success');
+            })
+            .catch(error => {
+                console.error('Error saving sequence:', error);
+                showAlert(`Failed to ${isEditing ? 'update' : 'save'} sequence: ${error.message}`, 'danger');
+            });
+        }
+        
+        function confirmDeleteSequence() {
+            const seqName = document.getElementById('deleteSequenceName').textContent;
+            
+            if (!seqName) {
+                showAlert('No sequence selected for deletion', 'danger');
+                return;
+            }
+            
+            const csrfToken = getCookie('csrftoken');
+            
+            fetch('{% url "column-sequence-api" %}', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
+                    table_name: currentTableName,
+                    seq_name: seqName
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('deleteSequenceModal'));
+                modal.hide();
+                
+                // Reload sequences
+                loadSavedSequences();
+                
+                showAlert(data.message || `Sequence "${seqName}" deleted successfully!`, 'success');
+            })
+            .catch(error => {
+                console.error('Error deleting sequence:', error);
+                showAlert(`Failed to delete sequence: ${error.message}`, 'danger');
+            });
         }
         
         function populateColumnSelector() {
@@ -3884,6 +5463,9 @@
                 return;
             }
             
+            // Persist current selection for future downloads
+            selectedColumnsForDownload = selectedColumns.map(col => col.name);
+
             // Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('columnSelectorModal'));
             modal.hide();
@@ -3892,6 +5474,213 @@
             loadTableData(currentPage, currentSortColumn, currentSortDirection, currentFilters);
             
             showAlert(`${selectedColumns.length} column(s) selected`, 'success');
+        }
+        
+        // Edit Sequence Modal Functions
+        function populateEditColumnSelector() {
+            const availableContainer = document.getElementById('editAvailableColumnsList');
+            const selectedContainer = document.getElementById('editSelectedColumnsList');
+            
+            availableContainer.innerHTML = '';
+            selectedContainer.innerHTML = '';
+            
+            const editSelectedColumnNames = editModalSelectedColumns.map(col => col.name);
+            
+            // Populate available columns (not in selected list)
+            allColumns.forEach(column => {
+                if (!editSelectedColumnNames.includes(column.name)) {
+                    const columnItem = createEditColumnItem(column, 'available');
+                    availableContainer.appendChild(columnItem);
+                }
+            });
+            
+            // Populate selected columns (in order)
+            editModalSelectedColumns.forEach(column => {
+                const columnItem = createEditColumnItem(column, 'selected');
+                selectedContainer.appendChild(columnItem);
+            });
+        }
+        
+        function createEditColumnItem(column, type) {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = `column-item ${type}-column-item`;
+            itemDiv.style.padding = '0.5rem 0.7rem';
+            itemDiv.style.marginBottom = '0.3rem';
+            itemDiv.style.borderRadius = '4px';
+            itemDiv.style.cursor = type === 'selected' ? 'move' : 'pointer';
+            itemDiv.style.fontSize = '0.85rem';
+            itemDiv.style.backgroundColor = type === 'selected' ? '#bbdefb' : '#ffffff';
+            itemDiv.style.border = '1px solid ' + (type === 'selected' ? '#2196f3' : '#dee2e6');
+            itemDiv.setAttribute('data-column-name', column.name);
+            itemDiv.setAttribute('data-column-type', column.type);
+            
+            if (type === 'selected') {
+                itemDiv.draggable = true;
+                itemDiv.innerHTML = `<i class="fas fa-grip-vertical me-2"></i>${column.name} <small class="text-muted">(${column.type})</small>`;
+                
+                // Drag events for reordering
+                itemDiv.addEventListener('dragstart', handleEditDragStart);
+                itemDiv.addEventListener('dragover', handleEditDragOver);
+                itemDiv.addEventListener('drop', handleEditDrop);
+                itemDiv.addEventListener('dragend', handleEditDragEnd);
+            } else {
+                itemDiv.innerHTML = `${column.name} <small class="text-muted">(${column.type})</small>`;
+            }
+            
+            // Click handler to move between lists
+            itemDiv.addEventListener('click', function() {
+                if (type === 'available') {
+                    moveEditColumnToSelected(column);
+                } else {
+                    moveEditColumnToAvailable(column);
+                }
+            });
+            
+            // Hover effect
+            itemDiv.addEventListener('mouseenter', function() {
+                if (type === 'available') {
+                    this.style.backgroundColor = '#e3f2fd';
+                }
+            });
+            
+            itemDiv.addEventListener('mouseleave', function() {
+                if (type === 'available') {
+                    this.style.backgroundColor = '#ffffff';
+                }
+            });
+            
+            return itemDiv;
+        }
+        
+        function moveEditColumnToSelected(column) {
+            if (!editModalSelectedColumns.find(col => col.name === column.name)) {
+                editModalSelectedColumns.push(column);
+                populateEditColumnSelector();
+            }
+        }
+        
+        function moveEditColumnToAvailable(column) {
+            editModalSelectedColumns = editModalSelectedColumns.filter(col => col.name !== column.name);
+            populateEditColumnSelector();
+        }
+        
+        function editAddAllColumns() {
+            editModalSelectedColumns = [...allColumns];
+            populateEditColumnSelector();
+        }
+        
+        function editRemoveAllColumns() {
+            editModalSelectedColumns = [];
+            populateEditColumnSelector();
+        }
+        
+        // Drag and drop functions for edit modal
+        function handleEditDragStart(e) {
+            editModalDraggedElement = this;
+            e.dataTransfer.effectAllowed = 'move';
+            this.style.opacity = '0.4';
+        }
+        
+        function handleEditDragOver(e) {
+            if (e.preventDefault) {
+                e.preventDefault();
+            }
+            e.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+        
+        function handleEditDrop(e) {
+            if (e.stopPropagation) {
+                e.stopPropagation();
+            }
+            
+            if (editModalDraggedElement !== this) {
+                const draggedColumnName = editModalDraggedElement.getAttribute('data-column-name');
+                const targetColumnName = this.getAttribute('data-column-name');
+                
+                const draggedIndex = editModalSelectedColumns.findIndex(col => col.name === draggedColumnName);
+                const targetIndex = editModalSelectedColumns.findIndex(col => col.name === targetColumnName);
+                
+                if (draggedIndex !== -1 && targetIndex !== -1) {
+                    // Remove from old position
+                    const [draggedColumn] = editModalSelectedColumns.splice(draggedIndex, 1);
+                    // Insert at new position
+                    editModalSelectedColumns.splice(targetIndex, 0, draggedColumn);
+                    
+                    populateEditColumnSelector();
+                }
+            }
+            
+            return false;
+        }
+        
+        function handleEditDragEnd(e) {
+            this.style.opacity = '1';
+            editModalDraggedElement = null;
+        }
+        
+        function confirmUpdateSequence() {
+            if (editModalSelectedColumns.length === 0) {
+                showAlert('Please select at least one column', 'warning');
+                return;
+            }
+            
+            // Get scope from the edit modal form
+            const scope = document.getElementById('editSequenceScope').value;
+            
+            if (!scope) {
+                showAlert('Please select a scope', 'warning');
+                return;
+            }
+            
+            // Convert selected columns to PostgreSQL array format
+            const columnNames = editModalSelectedColumns.map(col => col.name);
+            const sequenceString = '{' + columnNames.map(name => `"${name}"`).join(',') + '}';
+            
+            const csrfToken = getCookie('csrftoken');
+            
+            const requestData = {
+                table_name: currentTableName,
+                seq_name: editingSequenceName,
+                sequence: sequenceString,
+                scope: scope,  // Use the scope value from the form (G or L)
+                old_seq_name: editingSequenceName
+            };
+            
+            fetch('{% url "column-sequence-api" %}', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Close modal
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editSequenceModal'));
+                modal.hide();
+                
+                // Reload sequences in the main column selector modal
+                loadSavedSequences();
+                
+                showAlert(`Sequence "${editingSequenceName}" updated successfully!`, 'success');
+                
+                // Clear edit modal state
+                editModalSelectedColumns = [];
+                editingSequenceName = '';
+            })
+            .catch(error => {
+                console.error('Error updating sequence:', error);
+                showAlert(`Failed to update sequence: ${error.message}`, 'danger');
+            });
         }
 
         // Edit and Delete Functions
@@ -3966,7 +5755,21 @@
                 input.className = 'form-control';
                 input.name = column.name;
                 input.id = `edit_${column.name}`;
-                input.value = value;
+                // Format date value to YYYY-MM-DD for HTML5 date input
+                if (value) {
+                    try {
+                        const dateValue = new Date(value);
+                        if (!isNaN(dateValue.getTime())) {
+                            // Extract YYYY-MM-DD format
+                            const year = dateValue.getFullYear();
+                            const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+                            const day = String(dateValue.getDate()).padStart(2, '0');
+                            input.value = `${year}-${month}-${day}`;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse date value:', value);
+                    }
+                }
                 return input;
             } else if (columnType.includes('timestamp') || columnType.includes('datetime')) {
                 const input = document.createElement('input');
@@ -3974,7 +5777,24 @@
                 input.className = 'form-control';
                 input.name = column.name;
                 input.id = `edit_${column.name}`;
-                input.value = value;
+                // Format datetime value to YYYY-MM-DDTHH:MM:SS for HTML5 datetime-local input
+                if (value) {
+                    try {
+                        const dateValue = new Date(value);
+                        if (!isNaN(dateValue.getTime())) {
+                            // Extract YYYY-MM-DDTHH:MM:SS format
+                            const year = dateValue.getFullYear();
+                            const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+                            const day = String(dateValue.getDate()).padStart(2, '0');
+                            const hours = String(dateValue.getHours()).padStart(2, '0');
+                            const minutes = String(dateValue.getMinutes()).padStart(2, '0');
+                            const seconds = String(dateValue.getSeconds()).padStart(2, '0');
+                            input.value = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse datetime value:', value);
+                    }
+                }
                 return input;
             } else if (columnType.includes('time')) {
                 const input = document.createElement('input');
@@ -4087,7 +5907,10 @@
                                 errorMessage = text;
                             }
                         }
-                        throw new Error({ message: errorMessage, details: errorDetails });
+                        // Throw a structured error object (not Error class)
+                        const structuredError = new Error(errorMessage);
+                        structuredError.details = errorDetails;
+                        throw structuredError;
                     });
                 }
                 return response.json();
@@ -4109,10 +5932,10 @@
                 let errorDetails = [];
                 
                 // Handle structured error objects
-                if (error.message && typeof error.message === 'object') {
-                    errorMessage = error.message.message || errorMessage;
-                    errorDetails = error.message.details || [];
-                } else if (typeof error.message === 'string') {
+                if (error.details) {
+                    errorDetails = error.details;
+                }
+                if (error.message) {
                     errorMessage = error.message;
                 }
                 
@@ -4231,10 +6054,15 @@
         window.filterByInvalidDateValue = filterByInvalidDateValue;
         window.filterByInvalidCountryCodes = filterByInvalidCountryCodes;
         window.filterByInvalidCurrencyCodes = filterByInvalidCurrencyCodes;
-        window.filterByCurrencyMismatches = filterByCurrencyMismatches;
         window.filterByInvalidCountryCodeValue = filterByInvalidCountryCodeValue;
         window.filterByCountryValue = filterByCountryValue;
+        window.filterByPostalCodeMismatches = filterByPostalCodeMismatches;
+        window.filterByPostalCodeMismatchValue = filterByPostalCodeMismatchValue;
+        window.filterByInvalidUnits = filterByInvalidUnits;
+        window.filterByInvalidUnitValue = filterByInvalidUnitValue;
+        window.filterByColumnCombination = filterByColumnCombination;
         window.hideColumnStatsPopup = hideColumnStatsPopup;
     </script>
 {% endblock %}
+
 

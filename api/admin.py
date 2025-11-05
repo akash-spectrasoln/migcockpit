@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import User, Customer, Country, SourceDB, SourceForm           
+from .models import User, Customer, Country, SourceDB, SourceForm, ValidationRules           
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.admin.models import LogEntry
 
@@ -45,3 +45,5 @@ admin.site.register(Customer)
 admin.site.register(Country)
 admin.site.register(SourceDB)
 admin.site.register(SourceForm)
+admin.site.register(ValidationRules)
+
