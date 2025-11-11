@@ -269,6 +269,7 @@ class Customer(models.Model):
                 print(f"Database {self.cust_db} already exists")
             else:
                 # Create the database
+                
                 cursor.execute(f'CREATE DATABASE "{self.cust_db}";')
                 print(f"Created database: {self.cust_db}")
                 database_created = True
@@ -276,6 +277,7 @@ class Customer(models.Model):
                 try:
                     # Create schemas in the new database
                     self.create_customer_schemas()
+                    
                 except Exception as schema_error:
                     # If schema creation fails, drop the database to maintain consistency
                     print(f"Schema creation failed, rolling back database creation for {self.cust_db}")
@@ -292,7 +294,7 @@ class Customer(models.Model):
                 cursor.close()
             if conn:
                 conn.close()
-    
+
     def create_customer_schemas(self):
         """Create schemas in the customer's database."""
         import psycopg2
@@ -388,6 +390,46 @@ class ValidationRules(models.Model):
 
     class Meta:
         db_table = 'validationrules'
+
+class Roles(models.Model):
+    role_id = models.AutoField(primary_key=True)
+    cust_id = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name = 'customer_roles')
+    role_name = models.CharField(max_length=100)
+    created_on = models.DateTimeField(default=timezone.now)
+    is_active = models.BooleanField(default=True)
+    
+    # need to add these field when template is created for the role crud operation
+    # created_by 
+    # modified_by
+    # modified_on
+
+    def __str__(self):
+        return self.role_name
+
+    class Meta:
+        db_table = 'roles'
+    
+class UsrRoles(models.Model):
+    usr_id = models.AutoField(primary_key=True)
+    user_id = models.ForeignKey(User, on_delete=models.CASCADE, related_name = 'user_role')
+    role_id = models.ForeignKey(Roles,on_delete=models.CASCADE)
+    created_on = models.DateTimeField(default=timezone.now)
+    valid_from = models.DateField(null=True)
+    valid_to = models.DateField(null=True)
+
+    # need to add these field when template is created for the role crud operation
+    # created_by 
+    # modified_by
+    # modified_on
+
+    class Meta:
+        db_table = 'usrroles'
+    
+
+
+    
+
+    
 
 
     

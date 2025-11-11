@@ -6272,6 +6272,8 @@ class ValidationRulesView(APIView):
     def post(self, request):
         try:
             selected_ids = request.data.get('selected_ids', [])
+            max_length = request.data.get('max_length', None)
+
             
             if not selected_ids:
                 return Response({
@@ -6279,7 +6281,7 @@ class ValidationRulesView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Get selected rules from database
-            selected_rules = ValidationRules.objects.filter(id__in=selected_ids).order_by('id')
+            selected_rules = ValidationRules.objects.filter(id__in=selected_ids,category__in=['first char','content']).order_by('id')
             
             # Build regex by combining expressions
             regex_parts = ['^']
@@ -6288,11 +6290,18 @@ class ValidationRulesView(APIView):
                 if rule.expression:
                     regex_parts.append(rule.expression)
             
-            # Add character class and end
-            regex_parts.append('.+$')
+            last_char_rules = ValidationRules.objects.filter(id__in=selected_ids, category='last char').order_by('id')
+            if last_char_rules.exists():
+                last_char_rule = last_char_rules.first()
+                if last_char_rule and last_char_rule.expression:
+                    regex_parts.append(last_char_rule.expression)
+            
+            else:
+                # Add character class and end
+                regex_parts.append('.+$')
             
             # Combine all parts
-            final_regex = ''.join(regex_parts)
+            final_regex = "r'" + ''.join(regex_parts) + "'"
             
             # Print to terminal
             print("\n" + "="*80)
@@ -6310,6 +6319,7 @@ class ValidationRulesView(APIView):
             print(f"Error generating regex: {str(e)}")
             return Response({
                 "error": f"Failed to generate regex: {str(e)}"
+            # This line returns an HTTP 500 error response with the error message if an exception occurs during regex generation.
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 
