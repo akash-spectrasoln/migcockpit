@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import User, Customer, Country, SourceDB, SourceForm, ValidationRules,Roles,UsrRoles           
+from api.models import User, Customer, Country, SourceDB, SourceForm, ValidationRules, Roles, UsrRoles           
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.admin.models import LogEntry
 

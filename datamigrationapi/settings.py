@@ -11,6 +11,11 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +25,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-mc$d!kz_3-mim6o+&s7pp^!)1doog$h4n+3!qx=tm=#d4y6$#0'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-mc$d!kz_3-mim6o+&s7pp^!)1doog$h4n+3!qx=tm=#d4y6$#0')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '127.0.0.1,localhost').split(',')
 
 
 # Application definition
@@ -40,12 +45,14 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
+    'corsheaders',  # CORS support
     'api',
     'api_admin',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CORS middleware - must be before CommonMiddleware
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -81,13 +88,13 @@ WSGI_APPLICATION = 'datamigrationapi.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',  # or 'django.db.backends.mysql' for MySQL
-        'NAME': 'datamigrate',
-        'USER': 'postgres',
-        'PASSWORD': 'Password@123',
-        'HOST': 'localhost',  
-        'PORT': '5432', 
+        'NAME': os.getenv('DATABASE_NAME', 'datamigrate'),
+        'USER': os.getenv('DATABASE_USER', 'postgres'),
+        'PASSWORD': os.getenv('DATABASE_PASSWORD', 'SecurePassword123!'),
+        'HOST': os.getenv('DATABASE_HOST', 'localhost'),  
+        'PORT': os.getenv('DATABASE_PORT', '5433'), 
         'OPTIONS': {
-            'options': '-c search_path="GENERAL"'
+            'options': f'-c search_path="{os.getenv("DATABASE_SCHEMA", "GENERAL")}"'
         } 
 
     }
@@ -174,12 +181,13 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # Email Configuration
 # SMTP backend for sending emails via Spectra Solutions mail server
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'mail.spectrasoln.com'
-EMAIL_PORT = 465
-EMAIL_USE_SSL = True  
-EMAIL_HOST_USER = 'lms@spectrasoln.com'
-EMAIL_HOST_PASSWORD = 'LMS@SpEctra'
-DEFAULT_FROM_EMAIL = 'lms@spectrasoln.com'
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'mail.spectrasoln.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '465'))
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'True').lower() == 'true'
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'False').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'lms@spectrasoln.com')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', 'LMS@SpEctra')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'lms@spectrasoln.com')
 
 # Note: If port 465 doesn't work, try port 587 with TLS:
 # EMAIL_PORT = 587
@@ -188,3 +196,78 @@ DEFAULT_FROM_EMAIL = 'lms@spectrasoln.com'
 
   # Update with your deployment URL
 
+# Celery Configuration
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+# CORS Configuration
+CORS_ALLOWED_ORIGINS = os.getenv(
+    'CORS_ALLOWED_ORIGINS', 
+    'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173'
+).split(',')
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# FastAPI Extraction Service URL
+FASTAPI_EXTRACTION_SERVICE_URL = os.getenv('FASTAPI_EXTRACTION_SERVICE_URL', 'http://localhost:8001')
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'DEBUG',
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'api': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'api.views': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'api.services': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}

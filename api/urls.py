@@ -1,11 +1,54 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from .views import (
-    ProjectsListView, SqlConnectionView, SourcesListView, SourceFieldsView,
-    CountryListView, SourceConnectionCreateView, CustomerSourcesView, SourceEditView, SourceDeleteView, DestinationConnectionCreateView, CustomerDestinationsView, DestinationEditView, DestinationDeleteView, FileUploadPreviewView, WriteTableToDatabaseView, ListUploadedTablesView, GetTableDataView, GetDistinctValuesView, PreviewTableDataView, UploadTableDataView,
-     CreateTableRecordView, EditTableRecordView, DeleteTableRecordView, UpdateTableStructureView, DeleteTableView, CreateTableWithoutRecordsView, ImportDataFromHanaView, DownloadTableDataView, LoginView, LogoutView, RefreshTokenView,
-     TruncateTableView, CreateUserView, UserListView, UserUpdateView, UserDeleteView, UserPasswordResetView, UserPasswordResetConfirmView, ProjectsListView, ColumnStatisticsView, ColumnSequenceListView, ColumnSequenceView,
-     ValidationRulesView, 
+    # Auth views
+    LoginView, LogoutView, RefreshTokenView,
+    # User views
+    CreateUserView, UserListView, UserUpdateView, UserDeleteView,
+    UserPasswordResetView, UserPasswordResetConfirmView,
+    # Source views
+    SqlConnectionView, SourcesListView, SourceFieldsView, CountryListView,
+    SourceConnectionCreateView, CustomerSourcesView, SourceAttributesView,
+    SourceConnectionCreateWithValidationView, SourceEditView, SourceDeleteView,
+    SourceTablesView, SourceTableSelectionView, SourceTableDataView, SourceColumnsView,
+    SourceLiveSchemaView,
+    # Destination views
+    DestinationConnectionCreateView, CustomerDestinationsView,
+    DestinationEditView, DestinationDeleteView, DestinationTablesView,
+    # Project views
+    ProjectsListView,
+    # Pipeline views
+    FilterExecutionView, JoinExecutionView, PipelineQueryExecutionView,
+    # Expression views
+    ColumnStatisticsView, ColumnSequenceListView, ColumnSequenceView,
+    # Table views
+    FileUploadPreviewView, WriteTableToDatabaseView, ListUploadedTablesView,
+    GetTableDataView, GetDistinctValuesView, PreviewTableDataView, UploadTableDataView,
+    CreateTableRecordView, EditTableRecordView, DeleteTableRecordView,
+    UpdateTableStructureView, DeleteTableView, CreateTableWithoutRecordsView,
+    ImportDataFromHanaView, DownloadTableDataView, TruncateTableView,
+    # Misc views
+    ValidationRulesView, AggregateXMLImportView, AggregateXMLValidateView,
 )
+from .views.canvas_views import CanvasViewSet
+from .views.migration_views import MigrationJobViewSet
+from .views.metadata_views import MetadataViewSet
+from .views.project_views import ProjectViewSet
+from .views.node_cache_views import NodeCacheView, NodeCacheStatsView, NodeCacheCleanupView
+from .views.node_management import NodeInsertionView, NodeDeletionView, PipelineRecomputeView
+from .views.node_addition import AddNodeAfterView
+from .views.expression_validation import ValidateExpressionView
+from .views.expression_testing import TestExpressionView
+from .views import AggregateXMLImportView, AggregateXMLValidateView
+from .utils.compute_execution import ComputeNodeExecutionView, ComputeNodeCompileView
+
+
+# Router for ViewSets
+router = DefaultRouter()
+router.register(r'canvas', CanvasViewSet, basename='canvas')
+router.register(r'migration-jobs', MigrationJobViewSet, basename='migration-job')
+router.register(r'metadata', MetadataViewSet, basename='metadata')
+router.register(r'projects', ProjectViewSet, basename='project')
 
 urlpatterns = [
     # Authentication API endpoints
@@ -22,6 +65,9 @@ urlpatterns = [
 
     # Source API endpoints
     path('sources-connection/', SourceConnectionCreateView.as_view(), name='source-connection'),
+    path('sources-connection-validate/', SourceConnectionCreateWithValidationView.as_view(), name='source-connection-validate'),
+    path('source-attributes/', SourceAttributesView.as_view(), name='source-attributes'),
+    path('source-attributes/<str:source_type>/', SourceAttributesView.as_view(), name='source-attributes-by-type'),
     
     # Destination API endpoints
     path('destinations-connection/', DestinationConnectionCreateView.as_view(), name='destination-connection'),
@@ -35,12 +81,62 @@ urlpatterns = [
     # Source delete API endpoint
     path('api-customer/sources/<int:source_id>/delete/', SourceDeleteView.as_view(), name='source-delete-api'),
     
+    # Source tables API endpoint (with pagination)
+    path('api-customer/sources/<int:source_id>/tables/', SourceTablesView.as_view(), name='source-tables-api'),
+    
+    # Source table selection API endpoint
+    path('api-customer/sources/<int:source_id>/selected-tables/', SourceTableSelectionView.as_view(), name='source-table-selection-api'),
+    
+    # Source table data API endpoint
+    path('api-customer/sources/<int:source_id>/table-data/', SourceTableDataView.as_view(), name='source-table-data-api'),
+    
+    # Source columns API endpoint
+    path('api-customer/sources/<int:source_id>/columns/', SourceColumnsView.as_view(), name='source-columns-api'),
+
+    # Live schema for a single table (used for schema drift detection, no DB persistence)
+    path('api-customer/sources/<int:source_id>/table/<str:table_name>/schema', SourceLiveSchemaView.as_view(), name='source-live-schema-api'),
+    path('api-customer/sources/<int:source_id>/table/<str:table_name>/schema/', SourceLiveSchemaView.as_view(), name='source-live-schema-api-slash'),
+    
+    # Filter execution API endpoint
+    path('api-customer/sources/<int:source_id>/filter/', FilterExecutionView.as_view(), name='filter-execution-api'),
+    
+    # Join execution API endpoint
+    path('api-customer/sources/<int:source_id>/join/', JoinExecutionView.as_view(), name='join-execution-api'),
+    
+    # Pipeline query execution API endpoint
+    path('pipeline/execute/', PipelineQueryExecutionView.as_view(), name='pipeline-query-execution-api'),
+    # Node management API endpoints
+    path('pipeline/insert-node/', NodeInsertionView.as_view(), name='pipeline-insert-node'),
+    path('pipeline/insert-node', NodeInsertionView.as_view(), name='pipeline-insert-node-no-slash'),
+    path('pipeline/add-node-after/', AddNodeAfterView.as_view(), name='pipeline-add-node-after'),
+    path('pipeline/delete-node/', NodeDeletionView.as_view(), name='pipeline-delete-node'),
+    path('pipeline/recompute/', PipelineRecomputeView.as_view(), name='pipeline-recompute'),
+    path('validate-expression/', ValidateExpressionView.as_view(), name='validate-expression'),
+    path('test-expression/', TestExpressionView.as_view(), name='test-expression'),
+    
+    # XML Query import and validation API endpoints
+    path('xml-query/import/', AggregateXMLImportView.as_view(), name='xml-query-import-api'),
+    path('xml-query/validate/', AggregateXMLValidateView.as_view(), name='xml-query-validate-api'),
+    
+    # Compute Node execution API endpoint
+    path('compute/execute/', ComputeNodeExecutionView.as_view(), name='compute-execute-api'),
+    # Compute Node compilation/validation API endpoint
+    path('compute/compile/', ComputeNodeCompileView.as_view(), name='compute-compile-api'),
+    
+    # Node Cache API endpoints
+    path('node-cache/<int:canvas_id>/<str:node_id>/', NodeCacheView.as_view(), name='node-cache-api'),
+    path('node-cache/<int:canvas_id>/', NodeCacheView.as_view(), name='node-cache-canvas-api'),
+    path('node-cache/stats/', NodeCacheStatsView.as_view(), name='node-cache-stats-api'),
+    path('node-cache/stats/<int:canvas_id>/', NodeCacheStatsView.as_view(), name='node-cache-stats-canvas-api'),
+    path('node-cache/cleanup/', NodeCacheCleanupView.as_view(), name='node-cache-cleanup-api'),
+    
     # Customer destinations API endpoint
     path('api-customer/destinations/', CustomerDestinationsView.as_view(), name='customer-destinations-api'),
     
     # Destination edit API endpoint
     path('api-customer/destinations/<int:destination_id>/edit/', DestinationEditView.as_view(), name='destination-edit-api'),
-    
+    path('api-customer/destinations/<int:destination_id>/tables/', DestinationTablesView.as_view(), name='destination-tables-api'),
+
     # Destination delete API endpoint
     path('api-customer/destinations/<int:destination_id>/delete/', DestinationDeleteView.as_view(), name='destination-delete-api'),
     
@@ -84,9 +180,13 @@ urlpatterns = [
     path('api-column-statistics/', ColumnStatisticsView.as_view(), name='api-column-statistics'),
     
     # Column sequence API endpoints
+    # Column sequence API endpoints
     path('api-column-sequence-list/', ColumnSequenceListView.as_view(), name='column-sequence-list-api'),
     path('api-column-sequence/', ColumnSequenceView.as_view(), name='column-sequence-api'),
     path('api-validation-rules/', ValidationRulesView.as_view(), name='validation-rules-api'),
+    
+    # Canvas and Migration API endpoints (REST framework router)
+    path('', include(router.urls)),
 ]
 
 

@@ -1,0 +1,55 @@
+---
+description: Additional rules for SQL planner — compute inline vs anchor, shared source, source-side flatten, aggregation
+globs: services/migration_service/planner/**/*.py
+alwaysApply: false
+---
+
+# Planner additional rules
+
+## Compute node — inline vs anchor
+
+For each compute node, check:
+
+1. Does it use window functions? → **Anchor** (stage it)
+2. Does it reference fields from multiple staging tables? → **Anchor**
+3. Is its output consumed by multiple downstream branches? → **Anchor**
+4. Otherwise → **Inline** as a calc col expression in the flat SELECT
+
+Implementation: `classify_compute_node(node, edges) -> "inline" | "anchor"` in materialization.py
+
+## Source split into multiple branches
+
+When one source feeds N branches:
+
+1. Compute required_fields per branch using flatten_segment dependency resolution
+2. Overlap ratio = |intersection| / |union| of all branch required_fields
+3. If overlap > 0.7 OR source is remote → **shared source staging** (Option B)
+4. Else → linear_branches=True, each branch reads source independently (Option A)
+5. **NEVER** use SELECT * from source in either case
+
+## Source-side flatten_segment
+
+When a linear segment starts at a **SOURCE** node (not staging):
+
+- Use the same flatten_segment algorithm
+- Map db_name → technical_name using _compile_source_node mapping
+- Apply projection pushdown (only required_fields)
+- Push all eligible filters to WHERE
+- Result: `CREATE TABLE staging AS SELECT <only needed cols + inlined calc cols> FROM "schema"."source_table" WHERE <all pushed filters>`
+
+## Aggregation GROUP BY builder
+
+For aggregation anchor nodes, build:
+
+```sql
+SELECT
+  <group_by_fields>,
+  <agg_expressions>   -- e.g. SUM(field_A + field_B) AS sales_amount
+FROM upstream_staging
+GROUP BY <group_by_fields>
+HAVING <having_conditions if any>
+```
+
+- Inline any calc col formulas inside agg expressions
+- Push HAVING only if it references aggregated values
+- Pre-aggregation filters go in WHERE (before GROUP BY)

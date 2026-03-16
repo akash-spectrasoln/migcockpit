@@ -1,0 +1,52 @@
+---
+description: Standard project structure — where docs, tests, and service code live. Prevents misplaced files.
+alwaysApply: true
+---
+
+# Project structure (standard)
+
+Follow this layout everywhere. Do **not** create docs or tests inside app/service folders.
+
+## Where things go
+
+| Content | Location | Do not put here |
+|--------|----------|------------------|
+| **Documentation** (`.md` guides, architecture, how-tos) | `docs/` | Inside `api/`, `services/*/`, or project root |
+| **Tests** (`test_*.py`, `*_test.py`, pytest files) | `tests/` | Inside `api/`, `services/*/`, or next to the code under test |
+| **Django app** (models, views, serializers, urls) | `api/`, `api_admin/` | Loose `.py` scripts at project root |
+| **Standalone services** (FastAPI, workers, ETL) | `services/<service_name>/` | Mixing docs/tests inside the service |
+| **Frontend** (React/TS, components, pages) | `frontend/src/` | — |
+| **One-off/run scripts** (e.g. `check_*.py`, `list_*.py`) | `scripts/` | Project root (prefer scripts/ for clarity) |
+
+## Service folder structure (e.g. `services/migration_service/`)
+
+Use **routers**, **models**, and **services** (standard product layout):
+
+1. **Entry**: `main.py` (app, lifespan, include_router only)
+2. **Routers**: `routers/` — HTTP route handlers; delegate to services (no business logic in routers)
+3. **Models**: `models.py` (or `models/`) — request/response DTOs
+4. **Services**: business logic in subpackages — e.g. `orchestrator/`, `planner/`, `lifecycle/`, `loaders/`, `utils/`
+5. **One README**: `services/<service_name>/README.md` describing the ordered layout and flow
+
+**Do not** add inside a service folder:
+
+- `*.md` files (move to `docs/`)
+- `test_*.py` or pytest files (move to `tests/` and import from `services.<service_name>.*`)
+
+## Examples
+
+```text
+# ✅ GOOD
+docs/EXECUTION_PROGRESS_TRACKING.md
+docs/SQL_PUSHDOWN_IMPLEMENTATION.md
+tests/test_e2e_pushdown.py   # imports from services.migration_service.planner
+services/migration_service/README.md
+services/migration_service/planner/validation.py
+
+# ❌ BAD
+services/migration_service/EXECUTION_PROGRESS_TRACKING.md
+services/migration_service/test_e2e_pushdown.py
+api/ARCHITECTURE.md
+```
+
+When adding new docs or tests, place them in `docs/` or `tests/` and reference the service or app by name (e.g. `docs/<topic>.md`, `tests/test_<feature>.py`).
